@@ -1,0 +1,22 @@
+{
+  "name": "fleet-intelligence",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "infrastructure/cdk"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @fleet/web",
+    "dev:api": "cd services/backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "npm run build:packages && npm run build -w @fleet/web && npm run build -w @fleet/cdk",
+    "build:packages": "npm run build -w @fleet/constants && npm run build -w @fleet/types && npm run build -w @fleet/validation && npm run build -w @fleet/api-client",
+    "test": "npm run test -w @fleet/web",
+    "test:backend": "cd services/backend && python -m pytest",
+    "synth": "npm run synth -w @fleet/cdk",
+    "lint": "npm run lint -w @fleet/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

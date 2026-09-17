@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/backend/requirements.txt
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build shared packages
+        run: npm run build:packages
+
+      - name: Lint web
+        run: npm run lint -w @fleet/web
+
+      - name: Test web
+        run: npm run test -w @fleet/web
+
+      - name: Install Python dependencies
+        run: pip install -r services/backend/requirements.txt
+
+      - name: Ruff check backend
+        run: cd services/backend && python -m ruff check app tests
+
+      - name: Pytest backend
+        run: cd services/backend && PYTHONPATH=. python -m pytest
+        shell: bash
+
+      - name: CDK synth
+        run: npm run synth -w @fleet/cdk
+        env:
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          CDK_DEFAULT_REGION: us-east-1
