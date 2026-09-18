@@ -1,4 +1,4 @@
-import { EMPLOYEE_PERSONAS, EMPLOYEE_STATUSES, FUEL_TYPES, GENDERS, ROLES, TENANT_STATUSES, VEHICLE_TYPES } from "@fleet/constants";
+import { EMPLOYEE_PERSONAS, EMPLOYEE_STATUSES, FUEL_TYPES, GENDERS, LEASE_OWNERSHIP_TYPES, ROLES, TENANT_STATUSES, VEHICLE_STATUSES, VEHICLE_TYPES } from "@fleet/constants";
 import { z } from "zod";
 
 const roleEnum = z.enum([
@@ -44,18 +44,32 @@ export const createUserSchema = z.object({
 
 const vehicleTypeEnum = z.enum(VEHICLE_TYPES);
 const fuelTypeEnum = z.enum(FUEL_TYPES);
+const vehicleStatusEnum = z.enum(VEHICLE_STATUSES);
+const leaseOwnershipEnum = z.enum(LEASE_OWNERSHIP_TYPES);
 
 export const createVehicleSchema = z.object({
-  registrationNumber: z.string().min(1).max(32),
+  vehicleName: z.string().min(1).max(160),
+  registrationNumber: z.string().max(32).optional(),
   vin: z.string().max(32).optional(),
   make: z.string().min(1).max(80),
   model: z.string().min(1).max(80),
-  year: z.number().int().min(1980).max(2100).optional(),
+  year: z.coerce.number().int().min(1980).max(2100),
+  color: z.string().max(80).optional(),
+  dotNumber: z.string().max(32).optional(),
+  leaseOwnershipType: leaseOwnershipEnum.optional(),
   vehicleType: vehicleTypeEnum.optional(),
+  vehicleSubtype: z.string().max(80).optional(),
   fuelType: fuelTypeEnum.optional(),
+  cargoType: z.string().max(80).optional(),
+  weightLbs: z.coerce.number().min(0).optional(),
+  policyNumber: z.string().max(64).optional(),
+  coveredUnderPolicy: z.boolean().optional(),
+  status: vehicleStatusEnum.optional(),
   odometerKm: z.number().min(0).optional(),
   tenantId: z.string().uuid().optional(),
 });
+
+export const updateVehicleSchema = createVehicleSchema.omit({ tenantId: true }).partial();
 
 export const createDriverSchema = z.object({
   name: z.string().min(1).max(120),
@@ -114,6 +128,7 @@ export type CreateTenantInput = z.infer<typeof createTenantSchema>;
 export type UpdateTenantInput = z.infer<typeof updateTenantSchema>;
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type CreateVehicleInput = z.infer<typeof createVehicleSchema>;
+export type UpdateVehicleInput = z.infer<typeof updateVehicleSchema>;
 export type CreateDriverInput = z.infer<typeof createDriverSchema>;
 export type CreateAssignmentInput = z.infer<typeof createAssignmentSchema>;
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;

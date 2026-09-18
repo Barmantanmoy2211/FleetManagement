@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import HTTPException, status
 
 from app.core.dependencies import CurrentUser
-from app.models import Role, TenantStatus
+from app.models import EmployeePersona, Role, TenantStatus
 from app.repositories.dynamodb import DynamoDBRepository
 from app.schemas import (
     CreateTenantRequest,
@@ -91,6 +91,7 @@ class TenantService:
         vehicles = [
             VehicleService._to_response(v) for v in self.repo.list_vehicles_for_tenant(tenant_id)
         ]
+        linked_driver_count = self._count_linked_driver_employees(tenant_id, users)
 
         return TenantDetailResponse(
             tenant=self._to_response(item),
@@ -99,6 +100,7 @@ class TenantService:
             fleetManagers=fleet_managers,
             drivers=drivers,
             vehicles=vehicles,
+            linkedDriverCount=linked_driver_count,
         )
 
     def create_tenant(self, body: CreateTenantRequest, actor_user_id: str) -> TenantResponse:
@@ -180,6 +182,25 @@ class TenantService:
             after={"status": TenantStatus.INACTIVE.value},
         )
         return self._to_response(updated)
+
+    def _count_linked_driver_employees(self, tenant_id: str, users: list[dict]) -> int:
+        """Drivers tab: employees with Driver persona who have a platform user."""
+        user_emails = {
+            (u.get("email") or "").strip().lower()
+            for u in users
+            if u.get("email")
+        }
+        count = 0
+        for emp in self.repo.list_employees_for_tenant(tenant_id):
+            if emp.get("persona") != EmployeePersona.DRIVER.value:
+                continue
+            if emp.get("linkedUserId"):
+                count += 1
+                continue
+            email = (emp.get("email") or "").strip().lower()
+            if email and email in user_emails:
+                count += 1
+        return count
 
     @staticmethod
     def _to_response(item: dict) -> TenantResponse:

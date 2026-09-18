@@ -191,3 +191,33 @@ def test_fleet_manager_tenant_detail_tabs_data(client, ddb_table):
     roles = {u["role"] for u in body["users"]}
     assert "FleetAdmin" in roles
     assert "FleetManager" in roles
+
+
+def test_tenant_detail_linked_driver_count(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="Driver Count Org")
+    tid = tenant["tenantId"]
+    repo.create_employee(
+        tenant_id=tid,
+        name="Ava Harris",
+        employee_code="DRV-1009",
+        email="ava.harris@yopmail.com",
+        persona="Driver",
+    )
+    repo.create_user_profile(
+        tenant_id=tid,
+        email="ava.harris@yopmail.com",
+        role=Role.DRIVER,
+        cognito_sub="sub-ava",
+    )
+    admin = _dev_user_header(
+        userId="fa-dc",
+        role=Role.FLEET_ADMIN.value,
+        tenantId=tid,
+        email="fa-dc@test.com",
+    )
+    res = client.get(f"/api/v1/tenants/{tid}", headers=admin)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["linkedDriverCount"] == 1
+    assert body["drivers"] == []

@@ -11,6 +11,7 @@ import { ProfilePage } from "@/pages/ProfilePage";
 import { TenantDetailPage } from "@/pages/TenantDetailPage";
 import { TenantsPage } from "@/pages/TenantsPage";
 import { UsersPage } from "@/pages/UsersPage";
+import { VehicleDetailPage } from "@/pages/VehicleDetailPage";
 import { VehiclesPage } from "@/pages/VehiclesPage";
 import { useAuthStore } from "@/stores/authStore";
 import { ROLES } from "@fleet/constants";
@@ -72,6 +73,14 @@ export default function App() {
           element={
             <RoleRoute allowed={[ROLES.PLATFORM_ADMIN, ROLES.FLEET_ADMIN]}>
               <UsersPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="vehicles/:vehicleId"
+          element={
+            <RoleRoute allowed={FLEET_READ}>
+              <VehicleDetailPage />
             </RoleRoute>
           }
         />

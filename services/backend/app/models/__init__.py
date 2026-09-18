@@ -59,6 +59,13 @@ class FuelType(StrEnum):
     OTHER = "OTHER"
 
 
+class LeaseOwnershipType(StrEnum):
+    LEASE = "LEASE"
+    OWNED = "OWNED"
+    RENTED = "RENTED"
+    OTHER = "OTHER"
+
+
 class EmployeeStatus(StrEnum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"

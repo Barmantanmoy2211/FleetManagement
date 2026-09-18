@@ -13,11 +13,13 @@ import type {
   HealthResponse,
   ImportDriversFromUsersRequest,
   ImportEmployeesResponse,
+  ImportVehiclesResponse,
   MeResponse,
   Tenant,
   TenantDetail,
   UpdateEmployeeRequest,
   UpdateTenantRequest,
+  UpdateVehicleRequest,
   UserProfile,
   Vehicle,
 } from "@fleet/types";
@@ -149,6 +151,91 @@ export class FleetApiClient {
     return this.request(`${API_V1_PREFIX}/vehicles`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  getVehicle(vehicleId: string, tenantId?: string): Promise<Vehicle> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/vehicles/${vehicleId}${qs}`);
+  }
+
+  updateVehicle(
+    vehicleId: string,
+    body: UpdateVehicleRequest,
+    tenantId?: string,
+  ): Promise<Vehicle> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/vehicles/${vehicleId}${qs}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteVehicle(vehicleId: string, tenantId?: string): Promise<Vehicle> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/vehicles/${vehicleId}${qs}`, {
+      method: "DELETE",
+    });
+  }
+
+  async downloadVehicleImportTemplate(tenantId: string): Promise<Blob> {
+    const token = await this.getAccessToken();
+    const qs = `?tenantId=${encodeURIComponent(tenantId)}`;
+    const url = `${this.baseUrl.replace(/\/$/, "")}${API_V1_PREFIX}/vehicles/import-template${qs}`;
+    const headers: HeadersInit = {};
+    if (token) {
+      (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(url, { headers });
+    if (res.ok) {
+      return res.blob();
+    }
+    // Older deployed APIs may not have this route yet (404 on /vehicles/import-template).
+    if (res.status === 404 || res.status === 405) {
+      return this.downloadStaticVehicleImportTemplate();
+    }
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body && typeof body === "object" && "detail" in body) {
+        detail = String((body as { detail: unknown }).detail);
+      }
+    } catch {
+      try {
+        detail = await res.text();
+      } catch {
+        /* keep statusText */
+      }
+    }
+    throw new ApiError(res.status, detail);
+  }
+
+  /** Same workbook as backend template; works when API route is not deployed yet. */
+  async downloadStaticVehicleImportTemplate(): Promise<Blob> {
+    const staticUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/vehicle-import-template.xlsx`
+        : "/vehicle-import-template.xlsx";
+    const res = await fetch(staticUrl);
+    if (!res.ok) {
+      throw new ApiError(
+        res.status,
+        "Vehicle template file is missing. Redeploy the API or refresh the web app.",
+      );
+    }
+    return res.blob();
+  }
+
+  importVehiclesFromExcel(
+    file: File,
+    tenantId: string,
+  ): Promise<ImportVehiclesResponse> {
+    const form = new FormData();
+    form.append("file", file);
+    const qs = `?tenantId=${encodeURIComponent(tenantId)}`;
+    return this.request(`${API_V1_PREFIX}/vehicles/import${qs}`, {
+      method: "POST",
+      body: form,
     });
   }
 

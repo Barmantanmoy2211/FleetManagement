@@ -102,3 +102,4 @@ class TenantDetailResponse(BaseModel):
     fleetManagers: list[UserResponse]
     drivers: list[DriverResponse]
     vehicles: list[VehicleResponse]
+    linkedDriverCount: int = 0

@@ -51,6 +51,9 @@ export const FUEL_TYPES = [
 ] as const;
 export type FuelType = (typeof FUEL_TYPES)[number];
 
+export const LEASE_OWNERSHIP_TYPES = ["LEASE", "OWNED", "RENTED", "OTHER"] as const;
+export type LeaseOwnershipType = (typeof LEASE_OWNERSHIP_TYPES)[number];
+
 export const EMPLOYEE_STATUSES = [
   "ACTIVE",
   "INACTIVE",

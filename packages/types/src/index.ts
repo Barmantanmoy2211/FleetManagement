@@ -5,6 +5,7 @@ import type {
   EmployeePersona,
   FuelType,
   Gender,
+  LeaseOwnershipType,
   VehicleStatus,
   VehicleType,
 } from "@fleet/constants";
@@ -16,6 +17,7 @@ export type {
   EmployeePersona,
   FuelType,
   Gender,
+  LeaseOwnershipType,
   VehicleStatus,
   VehicleType,
 };
@@ -30,6 +32,7 @@ export {
   EMPLOYEE_STATUSES,
   FUEL_TYPES,
   GENDERS,
+  LEASE_OWNERSHIP_TYPES,
   VEHICLE_STATUSES,
   VEHICLE_TYPES,
 } from "@fleet/constants";
@@ -123,13 +126,24 @@ export interface HealthResponse {
 export interface Vehicle {
   vehicleId: string;
   tenantId: string;
+  vehicleName: string;
+  displayVehicleId?: string;
   registrationNumber: string;
   vin?: string | null;
   make: string;
   model: string;
   year?: number | null;
+  age?: number | null;
+  color?: string | null;
+  dotNumber?: string | null;
+  leaseOwnershipType?: LeaseOwnershipType | null;
   vehicleType: VehicleType;
+  vehicleSubtype?: string | null;
   fuelType: FuelType;
+  cargoType?: string | null;
+  weightLbs?: number | null;
+  policyNumber?: string | null;
+  coveredUnderPolicy?: boolean;
   status: VehicleStatus;
   odometerKm?: number | null;
   currentDriverId?: string | null;
@@ -139,27 +153,53 @@ export interface Vehicle {
 }
 
 export interface CreateVehicleRequest {
-  registrationNumber: string;
+  vehicleName: string;
+  registrationNumber?: string;
   vin?: string;
   make: string;
   model: string;
-  year?: number;
+  year: number;
+  color?: string;
+  dotNumber?: string;
+  leaseOwnershipType?: LeaseOwnershipType;
   vehicleType?: VehicleType;
+  vehicleSubtype?: string;
   fuelType?: FuelType;
+  cargoType?: string;
+  weightLbs?: number;
+  policyNumber?: string;
+  coveredUnderPolicy?: boolean;
+  status?: VehicleStatus;
   odometerKm?: number;
   tenantId?: string;
 }
 
 export interface UpdateVehicleRequest {
+  vehicleName?: string;
   registrationNumber?: string;
   vin?: string;
   make?: string;
   model?: string;
   year?: number;
+  color?: string;
+  dotNumber?: string;
+  leaseOwnershipType?: LeaseOwnershipType;
   vehicleType?: VehicleType;
+  vehicleSubtype?: string;
   fuelType?: FuelType;
+  cargoType?: string;
+  weightLbs?: number;
+  policyNumber?: string;
+  coveredUnderPolicy?: boolean;
   status?: VehicleStatus;
   odometerKm?: number;
+}
+
+export interface ImportVehiclesResponse {
+  created: number;
+  failed: number;
+  errors: { row: number; message: string }[];
+  vehicles: Vehicle[];
 }
 
 export interface Driver {
@@ -241,6 +281,8 @@ export interface TenantDetail {
   fleetManagers: UserProfile[];
   drivers: Driver[];
   vehicles: Vehicle[];
+  /** Employees with Driver persona + platform user (Drivers tab). */
+  linkedDriverCount?: number;
 }
 
 export interface Employee {

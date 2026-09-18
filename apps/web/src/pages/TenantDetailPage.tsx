@@ -7,8 +7,13 @@ import { useApiClient } from "@/hooks/useApiClient";
 import { useAuthStore } from "@/stores/authStore";
 import { EditTenantModal } from "@/components/EditTenantModal";
 import { TenantEmployeesPanel } from "@/components/TenantEmployeesPanel";
+import { TenantVehiclesPanel } from "@/components/TenantVehiclesPanel";
 import { TenantEmployeesByPersonaPanel } from "@/components/TenantEmployeesByPersonaPanel";
 import { TenantUsersPanel } from "@/components/TenantUsersPanel";
+import {
+  buildLinkedEmailSet,
+  filterEmployeesByPersonaAndLinked,
+} from "@/lib/employeePlatformUser";
 import {
   tabLabel,
   type TenantDetailTabId,
@@ -111,6 +116,34 @@ export function TenantDetailPage() {
     enabled: Boolean(tenantId),
   });
 
+  const employees = useQuery({
+    queryKey: ["employees", tenantId],
+    queryFn: () => api.listEmployees(tenantId!),
+    enabled: Boolean(tenantId),
+  });
+
+  const linkedDriverCount = useMemo(() => {
+    const data = detail.data;
+    if (!data) {
+      return 0;
+    }
+    if (data.linkedDriverCount != null) {
+      return data.linkedDriverCount;
+    }
+    if (!employees.data) {
+      return data.drivers.length;
+    }
+    const linkedEmails = buildLinkedEmailSet(
+      (data.users ?? []).map((u) => u.email),
+    );
+    return filterEmployeesByPersonaAndLinked(
+      employees.data,
+      "Driver",
+      linkedEmails,
+      true,
+    ).length;
+  }, [detail.data, employees.data]);
+
   const remove = useMutation({
     mutationFn: () => api.deleteTenant(tenantId!),
     onSuccess: () => {
@@ -136,6 +169,7 @@ export function TenantDetailPage() {
   const userCount =
     data.users?.length ??
     data.fleetAdmins.length + data.fleetManagers.length;
+
   const locationShort = [tenant.city, tenant.state, tenant.country].filter(Boolean).join(", ");
 
   return (
@@ -172,7 +206,7 @@ export function TenantDetailPage() {
           <HighlightStat label="Location" value={locationShort || "—"} />
           <HighlightStat
             label="Fleet size"
-            value={`${userCount} users · ${data.drivers.length} driver profiles · ${data.vehicles.length} vehicles`}
+            value={`${userCount} users · ${linkedDriverCount} drivers · ${data.vehicles.length} vehicles`}
           />
         </dl>
       </div>
@@ -268,7 +302,7 @@ function TabPanel({
   tenantId: string;
   canWriteEmployees: boolean;
 }) {
-  const { tenant, vehicles } = data;
+  const { tenant } = data;
   const locationLine = [
     tenant.street,
     tenant.city,
@@ -313,20 +347,11 @@ function TabPanel({
 
   if (tab === "vehicles") {
     return (
-      <EntityList empty="No vehicles.">
-        {vehicles.length > 0 ? (
-          <ul className="divide-y divide-slate-800 text-sm">
-            {vehicles.map((v) => (
-              <li key={v.vehicleId} className="flex justify-between py-2">
-                <span className="text-slate-200">
-                  {v.registrationNumber} · {v.make} {v.model}
-                </span>
-                <span className="text-slate-500">{v.status}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </EntityList>
+      <TenantVehiclesPanel
+        tenantId={tenantId}
+        tenantName={tenant.name}
+        canWrite={canWriteEmployees}
+      />
     );
   }
 
