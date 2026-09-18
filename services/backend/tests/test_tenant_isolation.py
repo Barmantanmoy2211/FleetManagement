@@ -99,7 +99,7 @@ def test_tenant_crud_platform_admin(client, ddb_table):
 
 def test_fleet_admin_cannot_list_tenants(client, ddb_table):
     repo = DynamoDBRepository(table_name="test-fleet-operational")
-    tenant = repo.create_tenant("Tenant A")
+    tenant = repo.create_tenant(name="Tenant A")
     fleet_admin = _dev_user_header(
         userId="fa-1",
         role=Role.FLEET_ADMIN.value,
@@ -112,8 +112,8 @@ def test_fleet_admin_cannot_list_tenants(client, ddb_table):
 
 def test_tenant_isolation_on_users(client, ddb_table):
     repo = DynamoDBRepository(table_name="test-fleet-operational")
-    t1 = repo.create_tenant("Tenant One")
-    t2 = repo.create_tenant("Tenant Two")
+    t1 = repo.create_tenant(name="Tenant One")
+    t2 = repo.create_tenant(name="Tenant Two")
     repo.create_user_profile(
         tenant_id=t1["tenantId"],
         email="u1@t1.test",
@@ -136,3 +136,58 @@ def test_tenant_isolation_on_users(client, ddb_table):
     res_ok = client.get("/api/v1/users", headers=admin_t2)
     assert res_ok.status_code == 200
     assert res_ok.json() == []
+
+
+def test_fleet_admin_tenant_detail_own_tenant(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="Own Org")
+    tid = tenant["tenantId"]
+    fleet_admin = _dev_user_header(
+        userId="fa-1",
+        role=Role.FLEET_ADMIN.value,
+        tenantId=tid,
+        email="fa@own.test",
+    )
+    res = client.get(f"/api/v1/tenants/{tid}", headers=fleet_admin)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["fleetAdmins"] == []
+    assert body["users"] == []
+    assert "tenant" in body
+
+    other = repo.create_tenant(name="Other")
+    res403 = client.get(f"/api/v1/tenants/{other['tenantId']}", headers=fleet_admin)
+    assert res403.status_code == 403
+
+
+def test_fleet_manager_tenant_detail_tabs_data(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="FM Org")
+    tid = tenant["tenantId"]
+    repo.create_user_profile(
+        tenant_id=tid,
+        email="admin@example.com",
+        role=Role.FLEET_ADMIN,
+        cognito_sub="sub-fa",
+    )
+    repo.create_user_profile(
+        tenant_id=tid,
+        email="fm@example.com",
+        role=Role.FLEET_MANAGER,
+        cognito_sub="sub-fm",
+    )
+    fm = _dev_user_header(
+        userId="fm-1",
+        role=Role.FLEET_MANAGER.value,
+        tenantId=tid,
+        email="fm@t.test",
+    )
+    res = client.get(f"/api/v1/tenants/{tid}", headers=fm)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["fleetAdmins"] == []
+    assert body["fleetManagers"] == []
+    assert len(body["users"]) >= 2
+    roles = {u["role"] for u in body["users"]}
+    assert "FleetAdmin" in roles
+    assert "FleetManager" in roles

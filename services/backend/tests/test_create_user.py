@@ -69,7 +69,7 @@ def test_create_user_accepts_camelcase_tenant_id(client, ddb_table):
     from app.repositories.dynamodb import DynamoDBRepository
 
     repo = DynamoDBRepository(table_name="test-fleet-operational")
-    tenant = repo.create_tenant("ABC Corp")
+    tenant = repo.create_tenant(name="ABC Corp")
     admin = _dev_user_header(
         userId="admin-1",
         role=Role.PLATFORM_ADMIN.value,

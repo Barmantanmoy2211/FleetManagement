@@ -1,6 +1,6 @@
 # Fleet & Driver Intelligence Platform
 
-Multi-tenant fleet and driver intelligence platform — Phase 1 (Foundation).
+Multi-tenant fleet and driver intelligence platform — Phase 1 foundation with **Phase 2 fleet management** (vehicles, drivers, assignments).
 
 ## Monorepo layout
 
@@ -79,6 +79,30 @@ copy .env.example .env
 # SKIP_JWT_VERIFY=true — use X-Dev-User header (see tests) or disable for real JWT
 python -m uvicorn app.main:app --reload --port 8000
 ```
+
+## Phase 2 — Fleet management
+
+API (tenant-scoped, JWT or dev headers):
+
+| Method | Path | Roles |
+|--------|------|--------|
+| GET/POST | `/api/v1/vehicles` | Read: all fleet roles; write: PlatformAdmin, FleetAdmin |
+| GET/PATCH | `/api/v1/vehicles/{id}` | Same |
+| GET | `/api/v1/drivers` | Read: all fleet roles |
+| GET | `/api/v1/drivers/import-candidates` | FleetAdmin, PlatformAdmin |
+| POST | `/api/v1/drivers/sync-from-users` | Import selected driver users (body: `userIds`) |
+| GET/PATCH | `/api/v1/drivers/{id}` | Read / update (no manual create) |
+| GET/POST | `/api/v1/assignments` | Read: all fleet roles; assign/end: PlatformAdmin, FleetAdmin, FleetManager |
+| POST | `/api/v1/assignments/{id}/end` | Assign roles |
+
+Web: **Vehicles**, **Drivers**, **Assignments** in the sidebar. Platform admins choose a tenant first.
+
+### Phase 2 acceptance checklist
+
+- [ ] Fleet admin can import driver profiles from Users (role Driver) for their tenant
+- [ ] Fleet manager can assign an available driver to an available vehicle
+- [ ] Ending an assignment returns driver/vehicle to `AVAILABLE` and keeps history
+- [ ] Tenant B admin cannot list tenant A vehicles (`tenantId` query blocked)
 
 ## Phase 1 acceptance checklist
 

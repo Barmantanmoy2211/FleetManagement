@@ -13,3 +13,67 @@ class Role(StrEnum):
     FLEET_MANAGER = "FleetManager"
     DRIVER = "Driver"
     VIEWER = "Viewer"
+
+
+class VehicleStatus(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    ASSIGNED = "ASSIGNED"
+    IN_TRIP = "IN_TRIP"
+    IDLE = "IDLE"
+    MAINTENANCE = "MAINTENANCE"
+    OFFLINE = "OFFLINE"
+    INACTIVE = "INACTIVE"
+
+
+class DriverStatus(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    ASSIGNED = "ASSIGNED"
+    ON_TRIP = "ON_TRIP"
+    ON_BREAK = "ON_BREAK"
+    OFF_DUTY = "OFF_DUTY"
+    SUSPENDED = "SUSPENDED"
+    INACTIVE = "INACTIVE"
+
+
+class AssignmentStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    ENDED = "ENDED"
+    CANCELLED = "CANCELLED"
+
+
+class VehicleType(StrEnum):
+    TRUCK = "TRUCK"
+    VAN = "VAN"
+    CAR = "CAR"
+    BUS = "BUS"
+    BIKE = "BIKE"
+    OTHER = "OTHER"
+
+
+class FuelType(StrEnum):
+    DIESEL = "DIESEL"
+    PETROL = "PETROL"
+    CNG = "CNG"
+    ELECTRIC = "ELECTRIC"
+    HYBRID = "HYBRID"
+    OTHER = "OTHER"
+
+
+class EmployeeStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    ON_LEAVE = "ON_LEAVE"
+    TERMINATED = "TERMINATED"
+
+
+class Gender(StrEnum):
+    MALE = "Male"
+    FEMALE = "Female"
+    OTHER = "Other"
+    PREFER_NOT_TO_SAY = "PreferNotToSay"
+
+
+class EmployeePersona(StrEnum):
+    FLEET_ADMIN = "Fleet Admin"
+    FLEET_MANAGER = "Fleet Manager"
+    DRIVER = "Driver"

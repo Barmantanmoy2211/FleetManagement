@@ -6,17 +6,23 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-3 py-2 text-sm ${isActive ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-900"}`;
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { email, role, logout } = useAuthStore();
+  const { email, role, logout, tenantId } = useAuthStore();
   const isPlatformAdmin = role === ROLES.PLATFORM_ADMIN;
   const canManageUsers =
     role === ROLES.PLATFORM_ADMIN || role === ROLES.FLEET_ADMIN;
+  const canSeeFleet =
+    role === ROLES.PLATFORM_ADMIN ||
+    role === ROLES.FLEET_ADMIN ||
+    role === ROLES.FLEET_MANAGER ||
+    role === ROLES.VIEWER ||
+    role === ROLES.DRIVER;
 
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-64 flex-col border-r border-slate-800 bg-slate-950 p-4">
         <div className="mb-8">
           <p className="text-lg font-semibold text-white">Fleet Intelligence</p>
-          <p className="text-xs text-slate-400">Phase 1</p>
+          <p className="text-xs text-slate-400">Phase 2 — Fleet</p>
         </div>
         <nav className="flex flex-1 flex-col gap-1">
           <NavLink to="/" end className={navLinkClass}>
@@ -27,10 +33,31 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               Tenants
             </NavLink>
           )}
+          {(role === ROLES.FLEET_ADMIN || role === ROLES.FLEET_MANAGER) && tenantId && (
+            <NavLink to={`/tenants/${tenantId}`} className={navLinkClass}>
+              Organization
+            </NavLink>
+          )}
           {canManageUsers && (
             <NavLink to="/users" className={navLinkClass}>
               Users
             </NavLink>
+          )}
+          {canSeeFleet && (
+            <>
+              <NavLink to="/vehicles" className={navLinkClass}>
+                Vehicles
+              </NavLink>
+              <NavLink to="/drivers" className={navLinkClass}>
+                Drivers
+              </NavLink>
+              <NavLink to="/employees" className={navLinkClass}>
+                Employees
+              </NavLink>
+              <NavLink to="/assignments" className={navLinkClass}>
+                Assignments
+              </NavLink>
+            </>
           )}
           <NavLink to="/profile" className={navLinkClass}>
             Profile
@@ -38,9 +65,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <span className="mt-4 px-3 text-xs uppercase tracking-wide text-slate-500">
             Coming soon
           </span>
-          <span className="px-3 py-2 text-sm text-slate-600">Vehicles</span>
-          <span className="px-3 py-2 text-sm text-slate-600">Drivers</span>
           <span className="px-3 py-2 text-sm text-slate-600">Trips</span>
+          <span className="px-3 py-2 text-sm text-slate-600">Live map</span>
         </nav>
         <div className="border-t border-slate-800 pt-4 text-sm">
           <p className="truncate text-slate-300">{email}</p>
