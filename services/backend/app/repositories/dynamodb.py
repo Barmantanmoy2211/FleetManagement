@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 from app.core.config import get_settings
 from app.models import (
@@ -14,15 +15,71 @@ from app.models import (
     EmployeeStatus,
     FuelType,
     LeaseOwnershipType,
+    LocationStatus,
     Role,
     TenantStatus,
+    TripStatus,
     VehicleStatus,
     VehicleType,
 )
 
 
+def _ddb_num(value: float) -> Decimal:
+    return Decimal(str(value))
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ddb_update_attr(key: str, names: dict[str, str]) -> str:
+    """Return expression attribute reference; alias DynamoDB reserved words."""
+    if key in ("name", "status"):
+        placeholder = f"#{key}"
+        names[placeholder] = key
+        return placeholder
+    return key
+
+
+def _ddb_update_item(
+    table: Any,
+    *,
+    item_key: dict[str, str],
+    updates: dict[str, Any],
+    skip_keys: frozenset[str],
+) -> dict[str, Any]:
+    expr_parts: list[str] = []
+    remove_parts: list[str] = []
+    values: dict[str, Any] = {}
+    names: dict[str, str] = {}
+    for attr_key, value in updates.items():
+        if attr_key in skip_keys:
+            continue
+        if value is None:
+            remove_parts.append(_ddb_update_attr(attr_key, names))
+            continue
+        placeholder = f":v_{attr_key}"
+        attr = _ddb_update_attr(attr_key, names)
+        expr_parts.append(f"{attr} = {placeholder}")
+        values[placeholder] = value
+    if not expr_parts and not remove_parts:
+        raise ValueError("No update expressions")
+    parts: list[str] = []
+    if expr_parts:
+        parts.append("SET " + ", ".join(expr_parts))
+    if remove_parts:
+        parts.append("REMOVE " + ", ".join(remove_parts))
+    kwargs: dict[str, Any] = {
+        "Key": item_key,
+        "UpdateExpression": " ".join(parts),
+        "ReturnValues": "ALL_NEW",
+    }
+    if values:
+        kwargs["ExpressionAttributeValues"] = values
+    if names:
+        kwargs["ExpressionAttributeNames"] = names
+    resp = table.update_item(**kwargs)
+    return resp["Attributes"]
 
 
 def _tenant_pk(tenant_id: str) -> str:
@@ -45,8 +102,16 @@ def _assignment_sk(assignment_id: str) -> str:
     return f"ASSIGNMENT#{assignment_id}"
 
 
+def _trip_sk(trip_id: str) -> str:
+    return f"TRIP#{trip_id}"
+
+
 def _employee_sk(employee_id: str) -> str:
     return f"EMPLOYEE#{employee_id}"
+
+
+def _location_sk(location_id: str) -> str:
+    return f"LOCATION#{location_id}"
 
 
 class DynamoDBRepository:
@@ -220,6 +285,143 @@ class DynamoDBRepository:
         )
         return updated
 
+    def create_location(
+        self,
+        *,
+        tenant_id: str,
+        name: str,
+        code: str | None = None,
+        street: str | None = None,
+        city: str | None = None,
+        state: str | None = None,
+        country: str | None = None,
+        status: LocationStatus = LocationStatus.ACTIVE,
+        is_primary: bool = False,
+    ) -> dict[str, Any]:
+        location_id = str(uuid.uuid4())
+        now = _now_iso()
+        item = {
+            "PK": _tenant_pk(tenant_id),
+            "SK": _location_sk(location_id),
+            "entityType": "Location",
+            "locationId": location_id,
+            "tenantId": tenant_id,
+            "name": name,
+            "code": code,
+            "street": street,
+            "city": city,
+            "state": state,
+            "country": country,
+            "status": status.value,
+            "isPrimary": is_primary,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        self.table.put_item(Item=item)
+        return item
+
+    def list_locations_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+        resp = self.table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+            ExpressionAttributeValues={
+                ":pk": _tenant_pk(tenant_id),
+                ":sk": "LOCATION#",
+            },
+        )
+        items = resp.get("Items", [])
+        return sorted(items, key=lambda x: (not x.get("isPrimary"), x.get("name", "")))
+
+    def get_location(self, tenant_id: str, location_id: str) -> dict[str, Any] | None:
+        resp = self.table.get_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _location_sk(location_id)}
+        )
+        return resp.get("Item")
+
+    def update_location(
+        self,
+        tenant_id: str,
+        location_id: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        existing = self.get_location(tenant_id, location_id)
+        if not existing:
+            return None
+        skip = frozenset({"locationId", "tenantId", "PK", "SK", "entityType", "createdAt"})
+        filtered = dict(updates)
+        if "status" in filtered and filtered["status"] is not None:
+            filtered["status"] = (
+                filtered["status"].value
+                if hasattr(filtered["status"], "value")
+                else filtered["status"]
+            )
+        filtered["updatedAt"] = _now_iso()
+        return _ddb_update_item(
+            self.table,
+            item_key={"PK": _tenant_pk(tenant_id), "SK": _location_sk(location_id)},
+            updates=filtered,
+            skip_keys=skip,
+        )
+
+    def get_primary_location_id(self, tenant_id: str) -> str | None:
+        for loc in self.list_locations_for_tenant(tenant_id):
+            if loc.get("isPrimary"):
+                return loc["locationId"]
+        locs = self.list_locations_for_tenant(tenant_id)
+        return locs[0]["locationId"] if locs else None
+
+    def ensure_primary_location(self, tenant_id: str) -> dict[str, Any]:
+        for loc in self.list_locations_for_tenant(tenant_id):
+            if loc.get("isPrimary"):
+                return loc
+        locs = self.list_locations_for_tenant(tenant_id)
+        if locs:
+            return locs[0]
+        tenant = self.get_tenant(tenant_id)
+        return self.create_location(
+            tenant_id=tenant_id,
+            name="Primary",
+            code=None,
+            city=tenant.get("city") if tenant else None,
+            state=tenant.get("state") if tenant else None,
+            country=tenant.get("country") if tenant else None,
+            street=tenant.get("street") if tenant else None,
+            is_primary=True,
+        )
+
+    def backfill_tenant_location_ids(self, tenant_id: str) -> str:
+        primary = self.ensure_primary_location(tenant_id)
+        lid = primary["locationId"]
+        for prefix in ("VEHICLE#", "DRIVER#", "ASSIGNMENT#", "TRIP#", "EMPLOYEE#"):
+            resp = self.table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                ExpressionAttributeValues={
+                    ":pk": _tenant_pk(tenant_id),
+                    ":sk": prefix,
+                },
+            )
+            for item in resp.get("Items", []):
+                if item.get("locationId"):
+                    continue
+                sk = item["SK"]
+                self.table.update_item(
+                    Key={"PK": _tenant_pk(tenant_id), "SK": sk},
+                    UpdateExpression="SET locationId = :lid, updatedAt = :u",
+                    ExpressionAttributeValues={
+                        ":lid": lid,
+                        ":u": _now_iso(),
+                    },
+                )
+        return lid
+
+    def set_primary_location(self, tenant_id: str, location_id: str) -> dict[str, Any] | None:
+        target = self.get_location(tenant_id, location_id)
+        if not target:
+            return None
+        for loc in self.list_locations_for_tenant(tenant_id):
+            if loc.get("isPrimary") and loc["locationId"] != location_id:
+                self.update_location(tenant_id, loc["locationId"], {"isPrimary": False})
+        return self.update_location(tenant_id, location_id, {"isPrimary": True})
+
     def create_user_profile(
         self,
         *,
@@ -228,8 +430,17 @@ class DynamoDBRepository:
         role: Role,
         cognito_sub: str,
         user_id: str | None = None,
+        location_id: str | None = None,
+        reports_to_user_id: str | None = None,
     ) -> dict[str, Any]:
         uid = user_id or str(uuid.uuid4())
+        if location_id is None and role in (
+            Role.LOCATION_HEAD,
+            Role.FLEET_MANAGER,
+            Role.DRIVER,
+            Role.VIEWER,
+        ):
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
         now = _now_iso()
         item = {
             "PK": _tenant_pk(tenant_id),
@@ -242,11 +453,36 @@ class DynamoDBRepository:
             "email": email,
             "role": role.value,
             "cognitoSub": cognito_sub,
+            "locationId": location_id,
+            "reportsToUserId": reports_to_user_id,
             "createdAt": now,
             "updatedAt": now,
         }
         self.table.put_item(Item=item)
         return item
+
+    def update_user_profile(
+        self, tenant_id: str, user_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        existing = self.get_user(tenant_id, user_id)
+        if not existing:
+            return None
+        allowed = {"timeZone", "locationId", "reportsToUserId"}
+        filtered = {k: v for k, v in updates.items() if k in allowed}
+        if not filtered:
+            return existing
+        filtered["updatedAt"] = _now_iso()
+        return _ddb_update_item(
+            self.table,
+            item_key={"PK": _tenant_pk(tenant_id), "SK": _user_sk(user_id)},
+            updates=filtered,
+        )
+
+    def get_user(self, tenant_id: str, user_id: str) -> dict[str, Any] | None:
+        resp = self.table.get_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _user_sk(user_id)},
+        )
+        return resp.get("Item")
 
     def list_users_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         resp = self.table.query(
@@ -267,15 +503,20 @@ class DynamoDBRepository:
         return None
 
     def get_user_by_cognito_sub(self, cognito_sub: str) -> dict[str, Any] | None:
-        resp = self.table.query(
-            IndexName="GSI1",
-            KeyConditionExpression="GSI1PK = :pk AND GSI1SK = :sk",
-            ExpressionAttributeValues={
-                ":pk": f"USER#{cognito_sub}",
-                ":sk": "META",
-            },
-            Limit=1,
-        )
+        try:
+            resp = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression="GSI1PK = :pk AND GSI1SK = :sk",
+                ExpressionAttributeValues={
+                    ":pk": f"USER#{cognito_sub}",
+                    ":sk": "META",
+                },
+                Limit=1,
+            )
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ResourceNotFoundException":
+                return None
+            raise
         items = resp.get("Items", [])
         return items[0] if items else None
 
@@ -335,7 +576,10 @@ class DynamoDBRepository:
         policy_number: str | None = None,
         covered_under_policy: bool = False,
         odometer_km: float | None = None,
+        location_id: str | None = None,
     ) -> dict[str, Any]:
+        if not location_id:
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
         vehicle_id = str(uuid.uuid4())
         now = _now_iso()
         item = {
@@ -344,6 +588,7 @@ class DynamoDBRepository:
             "entityType": "Vehicle",
             "vehicleId": vehicle_id,
             "tenantId": tenant_id,
+            "locationId": location_id,
             "vehicleName": vehicle_name,
             "registrationNumber": registration_number,
             "vin": vin or None,
@@ -370,7 +615,9 @@ class DynamoDBRepository:
         self.table.put_item(Item=item)
         return item
 
-    def list_vehicles_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+    def list_vehicles_for_tenant(
+        self, tenant_id: str, *, location_id: str | None = None
+    ) -> list[dict[str, Any]]:
         resp = self.table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
             ExpressionAttributeValues={
@@ -379,6 +626,13 @@ class DynamoDBRepository:
             },
         )
         items = resp.get("Items", [])
+        if location_id:
+            default = self.get_primary_location_id(tenant_id)
+            items = [
+                i
+                for i in items
+                if (i.get("locationId") or default) == location_id
+            ]
         return sorted(items, key=lambda x: x.get("registrationNumber", ""))
 
     def get_vehicle(self, tenant_id: str, vehicle_id: str) -> dict[str, Any] | None:
@@ -417,16 +671,21 @@ class DynamoDBRepository:
                 values[":v_status"] = value
             else:
                 expr_parts.append(f"{key} = {placeholder}")
-                values[placeholder] = value
+                if isinstance(value, float):
+                    values[placeholder] = Decimal(str(value))
+                else:
+                    values[placeholder] = value
         if not expr_parts:
             return existing
-        resp = self.table.update_item(
-            Key={"PK": _tenant_pk(tenant_id), "SK": _vehicle_sk(vehicle_id)},
-            UpdateExpression="SET " + ", ".join(expr_parts),
-            ExpressionAttributeValues=values,
-            ExpressionAttributeNames=names or None,
-            ReturnValues="ALL_NEW",
-        )
+        update_kwargs: dict[str, Any] = {
+            "Key": {"PK": _tenant_pk(tenant_id), "SK": _vehicle_sk(vehicle_id)},
+            "UpdateExpression": "SET " + ", ".join(expr_parts),
+            "ExpressionAttributeValues": values,
+            "ReturnValues": "ALL_NEW",
+        }
+        if names:
+            update_kwargs["ExpressionAttributeNames"] = names
+        resp = self.table.update_item(**update_kwargs)
         return resp["Attributes"]
 
     def create_driver(
@@ -442,7 +701,10 @@ class DynamoDBRepository:
         emergency_contact: str | None = None,
         joining_date: str | None = None,
         linked_user_id: str | None = None,
+        location_id: str | None = None,
     ) -> dict[str, Any]:
+        if not location_id:
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
         driver_id = str(uuid.uuid4())
         now = _now_iso()
         item = {
@@ -451,6 +713,7 @@ class DynamoDBRepository:
             "entityType": "Driver",
             "driverId": driver_id,
             "tenantId": tenant_id,
+            "locationId": location_id,
             "name": name,
             "email": email,
             "phone": phone,
@@ -500,6 +763,20 @@ class DynamoDBRepository:
             )
         return sorted(candidates, key=lambda x: x["email"].lower())
 
+    def _driver_display_name_for_user(
+        self, tenant_id: str, user_id: str, email: str
+    ) -> str:
+        target_email = email.strip().lower()
+        for emp in self.list_employees_for_tenant(tenant_id):
+            if emp.get("linkedUserId") == user_id:
+                if emp.get("name"):
+                    return str(emp["name"])
+            emp_email = (emp.get("email") or "").strip().lower()
+            if emp_email and emp_email == target_email and emp.get("name"):
+                return str(emp["name"])
+        local = email.split("@")[0]
+        return local.replace(".", " ").replace("_", " ").title()
+
     def sync_driver_profiles_from_users(
         self, tenant_id: str, user_ids: list[str]
     ) -> list[dict[str, Any]]:
@@ -521,8 +798,7 @@ class DynamoDBRepository:
             if self.find_driver_by_email(tenant_id, email):
                 wanted.discard(uid)
                 continue
-            local = email.split("@")[0]
-            name = local.replace(".", " ").replace("_", " ").title()
+            name = self._driver_display_name_for_user(tenant_id, uid, email)
             item = self.create_driver(
                 tenant_id=tenant_id,
                 name=name,
@@ -534,7 +810,9 @@ class DynamoDBRepository:
             wanted.discard(uid)
         return created
 
-    def list_drivers_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+    def list_drivers_for_tenant(
+        self, tenant_id: str, *, location_id: str | None = None
+    ) -> list[dict[str, Any]]:
         resp = self.table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
             ExpressionAttributeValues={
@@ -543,6 +821,13 @@ class DynamoDBRepository:
             },
         )
         items = resp.get("Items", [])
+        if location_id:
+            default = self.get_primary_location_id(tenant_id)
+            items = [
+                i
+                for i in items
+                if (i.get("locationId") or default) == location_id
+            ]
         return sorted(items, key=lambda x: x.get("name", ""))
 
     def get_driver(self, tenant_id: str, driver_id: str) -> dict[str, Any] | None:
@@ -584,7 +869,7 @@ class DynamoDBRepository:
         return resp["Attributes"]
 
     def list_assignments_for_tenant(
-        self, tenant_id: str, *, active_only: bool = False
+        self, tenant_id: str, *, active_only: bool = False, location_id: str | None = None
     ) -> list[dict[str, Any]]:
         resp = self.table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
@@ -596,6 +881,13 @@ class DynamoDBRepository:
         items = resp.get("Items", [])
         if active_only:
             items = [i for i in items if i.get("status") == AssignmentStatus.ACTIVE.value]
+        if location_id:
+            default = self.get_primary_location_id(tenant_id)
+            items = [
+                i
+                for i in items
+                if (i.get("locationId") or default) == location_id
+            ]
         return sorted(items, key=lambda x: x.get("startTime", ""), reverse=True)
 
     def get_assignment(
@@ -629,8 +921,14 @@ class DynamoDBRepository:
         driver_id: str,
         vehicle_id: str,
         assigned_by: str,
+        change_date: str,
+        release_date: str | None = None,
+        status: AssignmentStatus = AssignmentStatus.ACTIVE,
         start_time: str | None = None,
+        location_id: str | None = None,
     ) -> dict[str, Any]:
+        if not location_id:
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
         assignment_id = str(uuid.uuid4())
         now = _now_iso()
         start = start_time or now
@@ -640,11 +938,14 @@ class DynamoDBRepository:
             "entityType": "Assignment",
             "assignmentId": assignment_id,
             "tenantId": tenant_id,
+            "locationId": location_id,
             "driverId": driver_id,
             "vehicleId": vehicle_id,
+            "changeDate": change_date,
+            "releaseDate": release_date,
             "startTime": start,
             "endTime": None,
-            "status": AssignmentStatus.ACTIVE.value,
+            "status": status.value,
             "assignedBy": assigned_by,
             "createdAt": now,
             "updatedAt": now,
@@ -652,13 +953,63 @@ class DynamoDBRepository:
         self.table.put_item(Item=item)
         return item
 
+    def get_scheduled_assignment_for_driver(
+        self, tenant_id: str, driver_id: str
+    ) -> dict[str, Any] | None:
+        for item in self.list_assignments_for_tenant(tenant_id):
+            if item.get("driverId") != driver_id:
+                continue
+            if item.get("status") == AssignmentStatus.SCHEDULED.value:
+                return item
+        return None
+
+    def get_scheduled_assignment_for_vehicle(
+        self, tenant_id: str, vehicle_id: str
+    ) -> dict[str, Any] | None:
+        for item in self.list_assignments_for_tenant(tenant_id):
+            if item.get("vehicleId") != vehicle_id:
+                continue
+            if item.get("status") == AssignmentStatus.SCHEDULED.value:
+                return item
+        return None
+
+    def update_assignment_status(
+        self,
+        tenant_id: str,
+        assignment_id: str,
+        status: AssignmentStatus,
+        *,
+        start_time: str | None = None,
+    ) -> dict[str, Any] | None:
+        existing = self.get_assignment(tenant_id, assignment_id)
+        if not existing:
+            return None
+        now = _now_iso()
+        values: dict[str, Any] = {":st": status.value, ":u": now}
+        expr = "SET #st = :st, updatedAt = :u"
+        names = {"#st": "status"}
+        if start_time:
+            expr += ", startTime = :start"
+            values[":start"] = start_time
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _assignment_sk(assignment_id)},
+            UpdateExpression=expr,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
     def end_assignment(
         self, tenant_id: str, assignment_id: str, *, cancelled: bool = False
     ) -> dict[str, Any] | None:
         existing = self.get_assignment(tenant_id, assignment_id)
         if not existing:
             return None
-        if existing.get("status") != AssignmentStatus.ACTIVE.value:
+        if existing.get("status") not in (
+            AssignmentStatus.ACTIVE.value,
+            AssignmentStatus.SCHEDULED.value,
+        ):
             return existing
         now = _now_iso()
         status = AssignmentStatus.CANCELLED if cancelled else AssignmentStatus.ENDED
@@ -669,6 +1020,359 @@ class DynamoDBRepository:
             ExpressionAttributeValues={
                 ":st": status.value,
                 ":et": now,
+                ":u": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def update_assignment_fields(
+        self, tenant_id: str, assignment_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        existing = self.get_assignment(tenant_id, assignment_id)
+        if not existing:
+            return None
+        now = _now_iso()
+        updates = {**updates, "updatedAt": now}
+        skip = frozenset(
+            {
+                "PK",
+                "SK",
+                "entityType",
+                "assignmentId",
+                "tenantId",
+                "createdAt",
+                "driverId",
+                "vehicleId",
+                "assignedBy",
+                "startTime",
+                "endTime",
+                "status",
+            }
+        )
+        try:
+            return _ddb_update_item(
+                self.table,
+                item_key={
+                    "PK": _tenant_pk(tenant_id),
+                    "SK": _assignment_sk(assignment_id),
+                },
+                updates=updates,
+                skip_keys=skip,
+            )
+        except ValueError:
+            return existing
+
+    def create_trip(
+        self,
+        *,
+        tenant_id: str,
+        assignment_id: str,
+        driver_id: str,
+        vehicle_id: str,
+        started_by: str,
+        scheduled_start_time: str,
+        scheduled_end_time: str,
+        status: TripStatus,
+        pickup_latitude: float,
+        pickup_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        route_distance_km: float,
+        start_time: str | None = None,
+        location_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not location_id:
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
+        trip_id = str(uuid.uuid4())
+        now = _now_iso()
+        start = start_time or scheduled_start_time
+        item = {
+            "PK": _tenant_pk(tenant_id),
+            "SK": _trip_sk(trip_id),
+            "entityType": "Trip",
+            "tripId": trip_id,
+            "tenantId": tenant_id,
+            "locationId": location_id,
+            "assignmentId": assignment_id,
+            "driverId": driver_id,
+            "vehicleId": vehicle_id,
+            "status": status.value,
+            "scheduledStartTime": scheduled_start_time,
+            "scheduledEndTime": scheduled_end_time,
+            "actualStartTime": None,
+            "pickupLatitude": _ddb_num(pickup_latitude),
+            "pickupLongitude": _ddb_num(pickup_longitude),
+            "destinationLatitude": _ddb_num(destination_latitude),
+            "destinationLongitude": _ddb_num(destination_longitude),
+            "routeDistanceKm": _ddb_num(route_distance_km),
+            "startTime": start,
+            "endTime": None,
+            "lastLatitude": None,
+            "lastLongitude": None,
+            "startedBy": started_by,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        self.table.put_item(Item=item)
+        return item
+
+    def list_trips_for_tenant(
+        self,
+        tenant_id: str,
+        *,
+        active_only: bool = False,
+        open_only: bool = False,
+        assignment_id: str | None = None,
+        location_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        resp = self.table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+            ExpressionAttributeValues={
+                ":pk": _tenant_pk(tenant_id),
+                ":sk": "TRIP#",
+            },
+        )
+        items = resp.get("Items", [])
+        if assignment_id:
+            items = [i for i in items if i.get("assignmentId") == assignment_id]
+        if active_only:
+            items = [i for i in items if i.get("status") == TripStatus.IN_PROGRESS.value]
+        elif open_only:
+            open_statuses = {
+                TripStatus.SCHEDULED.value,
+                TripStatus.IN_PROGRESS.value,
+            }
+            items = [i for i in items if i.get("status") in open_statuses]
+        if location_id:
+            default = self.get_primary_location_id(tenant_id)
+            items = [
+                i
+                for i in items
+                if (i.get("locationId") or default) == location_id
+            ]
+        return sorted(items, key=lambda x: x.get("startTime", ""), reverse=True)
+
+    def list_trips_for_assignment(
+        self, tenant_id: str, assignment_id: str
+    ) -> list[dict[str, Any]]:
+        return [
+            t
+            for t in self.list_trips_for_tenant(tenant_id)
+            if t.get("assignmentId") == assignment_id
+        ]
+
+    def get_trip(self, tenant_id: str, trip_id: str) -> dict[str, Any] | None:
+        resp = self.table.get_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+        )
+        return resp.get("Item")
+
+    def get_active_trip_for_vehicle(
+        self, tenant_id: str, vehicle_id: str
+    ) -> dict[str, Any] | None:
+        for item in self.list_trips_for_tenant(tenant_id, active_only=True):
+            if item.get("vehicleId") == vehicle_id:
+                return item
+        return None
+
+    def get_active_trip_for_driver(
+        self, tenant_id: str, driver_id: str
+    ) -> dict[str, Any] | None:
+        for item in self.list_trips_for_tenant(tenant_id, active_only=True):
+            if item.get("driverId") == driver_id:
+                return item
+        return None
+
+    def end_trip(
+        self,
+        tenant_id: str,
+        trip_id: str,
+        *,
+        cancelled: bool = False,
+        time_taken_minutes: float | None = None,
+        fuel_required_liters: float | None = None,
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing:
+            return None
+        status_val = existing.get("status")
+        if status_val not in (
+            TripStatus.IN_PROGRESS.value,
+            TripStatus.SCHEDULED.value,
+        ):
+            return existing
+        now = _now_iso()
+        if status_val == TripStatus.SCHEDULED.value:
+            status = TripStatus.CANCELLED
+        elif cancelled:
+            status = TripStatus.CANCELLED
+        else:
+            status = TripStatus.COMPLETED
+        values: dict[str, Any] = {
+            ":st": status.value,
+            ":et": now,
+            ":u": now,
+        }
+        if status == TripStatus.COMPLETED:
+            update_expr = (
+                "SET #st = :st, endTime = :et, timeTakenMinutes = :tt, "
+                "fuelRequiredLiters = :fuel, updatedAt = :u"
+            )
+            values[":tt"] = _ddb_num(time_taken_minutes or 0)
+            values[":fuel"] = _ddb_num(fuel_required_liters or 0)
+        else:
+            update_expr = "SET #st = :st, endTime = :et, updatedAt = :u"
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues=values,
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def activate_scheduled_trip(
+        self, tenant_id: str, trip_id: str, *, start_time: str
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing or existing.get("status") != TripStatus.SCHEDULED.value:
+            return None
+        now = _now_iso()
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression=(
+                "SET #st = :st, startTime = :stt, actualStartTime = :stt, updatedAt = :u"
+            ),
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":st": TripStatus.IN_PROGRESS.value,
+                ":stt": start_time,
+                ":u": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def record_actual_trip_start(
+        self, tenant_id: str, trip_id: str, *, start_time: str
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing:
+            return None
+        if existing.get("status") != TripStatus.IN_PROGRESS.value:
+            return None
+        if existing.get("actualStartTime"):
+            return existing
+        now = _now_iso()
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression=(
+                "SET startTime = :stt, actualStartTime = :stt, updatedAt = :u"
+            ),
+            ExpressionAttributeValues={
+                ":stt": start_time,
+                ":u": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def update_trip_schedule(
+        self,
+        tenant_id: str,
+        trip_id: str,
+        *,
+        scheduled_start_time: str,
+        scheduled_end_time: str,
+        pickup_latitude: float,
+        pickup_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        route_distance_km: float,
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing or existing.get("status") != TripStatus.SCHEDULED.value:
+            return None
+        now = _now_iso()
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression=(
+                "SET scheduledStartTime = :ss, scheduledEndTime = :se, "
+                "startTime = :ss, pickupLatitude = :plat, pickupLongitude = :plng, "
+                "destinationLatitude = :dlat, destinationLongitude = :dlng, "
+                "routeDistanceKm = :dist, updatedAt = :u"
+            ),
+            ExpressionAttributeValues={
+                ":ss": scheduled_start_time,
+                ":se": scheduled_end_time,
+                ":plat": _ddb_num(pickup_latitude),
+                ":plng": _ddb_num(pickup_longitude),
+                ":dlat": _ddb_num(destination_latitude),
+                ":dlng": _ddb_num(destination_longitude),
+                ":dist": _ddb_num(route_distance_km),
+                ":u": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def update_trip_route(
+        self,
+        tenant_id: str,
+        trip_id: str,
+        *,
+        pickup_latitude: float,
+        pickup_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        route_distance_km: float,
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing:
+            return None
+        if existing.get("status") not in (
+            TripStatus.SCHEDULED.value,
+            TripStatus.IN_PROGRESS.value,
+        ):
+            return None
+        now = _now_iso()
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression=(
+                "SET pickupLatitude = :plat, pickupLongitude = :plng, "
+                "destinationLatitude = :dlat, destinationLongitude = :dlng, "
+                "routeDistanceKm = :dist, updatedAt = :u"
+            ),
+            ExpressionAttributeValues={
+                ":plat": _ddb_num(pickup_latitude),
+                ":plng": _ddb_num(pickup_longitude),
+                ":dlat": _ddb_num(destination_latitude),
+                ":dlng": _ddb_num(destination_longitude),
+                ":dist": _ddb_num(route_distance_km),
+                ":u": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        return resp["Attributes"]
+
+    def update_trip_location(
+        self,
+        tenant_id: str,
+        trip_id: str,
+        latitude: float,
+        longitude: float,
+    ) -> dict[str, Any] | None:
+        existing = self.get_trip(tenant_id, trip_id)
+        if not existing:
+            return None
+        now = _now_iso()
+        resp = self.table.update_item(
+            Key={"PK": _tenant_pk(tenant_id), "SK": _trip_sk(trip_id)},
+            UpdateExpression="SET lastLatitude = :lat, lastLongitude = :lng, updatedAt = :u",
+            ExpressionAttributeValues={
+                ":lat": Decimal(str(latitude)),
+                ":lng": Decimal(str(longitude)),
                 ":u": now,
             },
             ReturnValues="ALL_NEW",
@@ -705,7 +1409,11 @@ class DynamoDBRepository:
         job_role: str | None = None,
         persona: str | None = None,
         linked_user_id: str | None = None,
+        driver_manager_user_id: str | None = None,
+        location_id: str | None = None,
     ) -> dict[str, Any]:
+        if not location_id:
+            location_id = self.ensure_primary_location(tenant_id)["locationId"]
         employee_id = str(uuid.uuid4())
         now = _now_iso()
         item = {
@@ -714,6 +1422,7 @@ class DynamoDBRepository:
             "entityType": "Employee",
             "employeeId": employee_id,
             "tenantId": tenant_id,
+            "locationId": location_id,
             "name": name,
             "employeeCode": employee_code,
             "dateOfBirth": date_of_birth,
@@ -742,13 +1451,16 @@ class DynamoDBRepository:
             "jobRole": job_role,
             "persona": persona,
             "linkedUserId": linked_user_id,
+            "driverManagerUserId": driver_manager_user_id,
             "createdAt": now,
             "updatedAt": now,
         }
         self.table.put_item(Item=item)
         return item
 
-    def list_employees_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+    def list_employees_for_tenant(
+        self, tenant_id: str, *, location_id: str | None = None
+    ) -> list[dict[str, Any]]:
         resp = self.table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
             ExpressionAttributeValues={
@@ -757,6 +1469,13 @@ class DynamoDBRepository:
             },
         )
         items = resp.get("Items", [])
+        if location_id:
+            default = self.get_primary_location_id(tenant_id)
+            items = [
+                i
+                for i in items
+                if (i.get("locationId") or default) == location_id
+            ]
         return sorted(items, key=lambda x: x.get("name", ""))
 
     def get_employee(self, tenant_id: str, employee_id: str) -> dict[str, Any] | None:
@@ -773,26 +1492,15 @@ class DynamoDBRepository:
             return None
         now = _now_iso()
         updates = {**updates, "updatedAt": now}
-        expr_parts = []
-        values: dict[str, Any] = {}
-        names: dict[str, str] = {}
-        for key, value in updates.items():
-            if key in ("PK", "SK", "entityType", "employeeId", "tenantId", "createdAt"):
-                continue
-            placeholder = f":v_{key}"
-            if key == "status":
-                names["#status"] = "status"
-                expr_parts.append(f"#status = {placeholder}")
-            else:
-                expr_parts.append(f"{key} = {placeholder}")
-            values[placeholder] = value
-        if not expr_parts:
-            return existing
-        resp = self.table.update_item(
-            Key={"PK": _tenant_pk(tenant_id), "SK": _employee_sk(employee_id)},
-            UpdateExpression="SET " + ", ".join(expr_parts),
-            ExpressionAttributeValues=values,
-            ExpressionAttributeNames=names or None,
-            ReturnValues="ALL_NEW",
+        skip = frozenset(
+            {"PK", "SK", "entityType", "employeeId", "tenantId", "createdAt"}
         )
-        return resp["Attributes"]
+        try:
+            return _ddb_update_item(
+                self.table,
+                item_key={"PK": _tenant_pk(tenant_id), "SK": _employee_sk(employee_id)},
+                updates=updates,
+                skip_keys=skip,
+            )
+        except ValueError:
+            return existing

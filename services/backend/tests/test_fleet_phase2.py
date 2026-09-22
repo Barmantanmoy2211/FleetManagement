@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -122,7 +123,11 @@ def test_assignment_lifecycle(client, ddb_table):
 
     a = client.post(
         "/api/v1/assignments",
-        json={"driverId": driver_id, "vehicleId": vehicle_id},
+        json={
+            "driverId": driver_id,
+            "vehicleId": vehicle_id,
+            "changeDate": date.today().isoformat(),
+        },
         headers=admin,
     )
     assert a.status_code == 201

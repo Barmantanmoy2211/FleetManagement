@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { Employee } from "@fleet/types";
+import type { Employee, UserProfile } from "@fleet/types";
 
 type Props = {
   tenantId: string;
@@ -7,6 +7,8 @@ type Props = {
   isLoading: boolean;
   emptyMessage: string;
   showPersona?: boolean;
+  showDriverManager?: boolean;
+  usersById?: Map<string, UserProfile>;
 };
 
 export function TenantEmployeeListTable({
@@ -15,8 +17,11 @@ export function TenantEmployeeListTable({
   isLoading,
   emptyMessage,
   showPersona = false,
+  showDriverManager = false,
+  usersById,
 }: Props) {
-  const colSpan = showPersona ? 5 : 4;
+  const colSpan =
+    4 + (showPersona ? 1 : 0) + (showDriverManager ? 1 : 0);
 
   return (
     <div className="overflow-x-auto">
@@ -27,6 +32,9 @@ export function TenantEmployeeListTable({
             <th className="px-4 py-3 font-medium">Employee ID</th>
             {showPersona && (
               <th className="px-4 py-3 font-medium">Persona</th>
+            )}
+            {showDriverManager && (
+              <th className="px-4 py-3 font-medium">Driver manager</th>
             )}
             <th className="px-4 py-3 font-medium">Email</th>
             <th className="px-4 py-3 font-medium">Status</th>
@@ -54,6 +62,15 @@ export function TenantEmployeeListTable({
                 <td className="px-4 py-3 text-slate-400">{emp.employeeCode ?? "—"}</td>
                 {showPersona && (
                   <td className="px-4 py-3">{emp.persona ?? "—"}</td>
+                )}
+                {showDriverManager && (
+                  <td className="px-4 py-3 text-slate-400">
+                    {emp.driverManagerUserId
+                      ? (usersById?.get(emp.driverManagerUserId)?.email ??
+                        emp.driverManagerEmail ??
+                        emp.driverManagerUserId)
+                      : "—"}
+                  </td>
                 )}
                 <td className="px-4 py-3 text-slate-400">{emp.email ?? "—"}</td>
                 <td className="px-4 py-3">

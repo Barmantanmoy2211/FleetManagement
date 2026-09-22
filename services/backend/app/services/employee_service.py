@@ -22,11 +22,18 @@ from app.services.employee_excel import (
     parse_employee_import_rows,
 )
 from app.services.tenant_scope import resolve_effective_tenant
+from app.services.location_scope import (
+    ALL_LOCATIONS,
+    assert_location_access,
+    resolve_effective_location_id,
+    resolve_location_scope,
+)
 from app.services.user_service import UserService
 
 
 PERSONA_TO_ROLE: dict[EmployeePersona, Role] = {
     EmployeePersona.FLEET_ADMIN: Role.FLEET_ADMIN,
+    EmployeePersona.LOCATION_HEAD: Role.LOCATION_HEAD,
     EmployeePersona.FLEET_MANAGER: Role.FLEET_MANAGER,
     EmployeePersona.DRIVER: Role.DRIVER,
 }
@@ -46,11 +53,59 @@ class EmployeeService:
     def __init__(self, repo: DynamoDBRepository | None = None):
         self.repo = repo or DynamoDBRepository()
 
+    def _validate_driver_manager_user_id(
+        self, tenant_id: str, driver_manager_user_id: str | None
+    ) -> None:
+        if not driver_manager_user_id:
+            return
+        for user in self.repo.list_users_for_tenant(tenant_id):
+            if user.get("userId") == driver_manager_user_id:
+                if user.get("role") != Role.FLEET_MANAGER.value:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Driver manager must be a Fleet Manager user",
+                    )
+                return
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Driver manager user not found in this tenant",
+        )
+
+    def _filter_for_fleet_manager(
+        self, current: CurrentUser, items: list[dict]
+    ) -> list[dict]:
+        if current.role != Role.FLEET_MANAGER:
+            return items
+        return [
+            i
+            for i in items
+            if i.get("persona") != EmployeePersona.DRIVER.value
+            or i.get("driverManagerUserId") == current.user_id
+        ]
+
+    def _ensure_fleet_manager_can_access(self, current: CurrentUser, item: dict) -> None:
+        if current.role != Role.FLEET_MANAGER:
+            return
+        if item.get("persona") == EmployeePersona.DRIVER.value:
+            if item.get("driverManagerUserId") != current.user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
+                )
+
     def list_employees(
         self, current: CurrentUser, tenant_id: str | None
     ) -> list[EmployeeResponse]:
         effective = resolve_effective_tenant(current, tenant_id)
-        items = self.repo.list_employees_for_tenant(effective)
+        self.repo.backfill_tenant_location_ids(effective)
+        scope = resolve_location_scope(current, effective, self.repo)
+        if scope is ALL_LOCATIONS:
+            items = self.repo.list_employees_for_tenant(effective)
+        else:
+            items = self.repo.list_employees_for_tenant(
+                effective, location_id=next(iter(scope))
+            )
+        if current.role == Role.FLEET_MANAGER:
+            items = self._filter_for_fleet_manager(current, items)
         return [self._to_response(self._with_resolved_user_link(effective, i)) for i in items]
 
     def get_employee(
@@ -62,6 +117,7 @@ class EmployeeService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
             )
+        self._ensure_fleet_manager_can_access(current, item)
         return self._to_response(self._with_resolved_user_link(effective, item))
 
     def _with_resolved_user_link(self, tenant_id: str, item: dict) -> dict:
@@ -135,6 +191,15 @@ class EmployeeService:
         is_driver = body.isDriver
         if body.persona == EmployeePersona.DRIVER:
             is_driver = True
+        if body.driverManagerUserId and body.persona != EmployeePersona.DRIVER:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Driver manager applies only to Driver persona",
+            )
+        self._validate_driver_manager_user_id(tenant_id, body.driverManagerUserId)
+        loc: str | None = None
+        if body.persona and body.persona != EmployeePersona.FLEET_ADMIN:
+            loc = resolve_effective_location_id(self.repo, tenant_id, body.locationId)
         return self.repo.create_employee(
             tenant_id=tenant_id,
             name=body.name,
@@ -162,15 +227,32 @@ class EmployeeService:
             department=body.department,
             job_role=body.jobRole,
             persona=body.persona.value if body.persona else None,
+            driver_manager_user_id=body.driverManagerUserId,
+            location_id=loc,
         )
+
+    def _resolve_driver_manager_user_id(
+        self, tenant_id: str, row: dict[str, Any]
+    ) -> str | None:
+        email = row.get("driverManagerEmail")
+        if not email:
+            return None
+        user = self.repo.find_user_by_email(tenant_id, email)
+        if not user:
+            raise ValueError(f"Driver manager user not found for email '{email}'")
+        if user.get("role") != Role.FLEET_MANAGER.value:
+            raise ValueError(f"User '{email}' is not a Fleet Manager")
+        return user["userId"]
 
     def _row_to_create_request(self, row: dict, tenant_id: str) -> CreateEmployeeRequest:
         persona = EmployeePersona(row["persona"]) if row.get("persona") else None
+        driver_manager_user_id = self._resolve_driver_manager_user_id(tenant_id, row)
         return CreateEmployeeRequest(
             tenantId=tenant_id,
             name=row["name"],
             employeeCode=row.get("employeeCode"),
             persona=persona,
+            driverManagerUserId=driver_manager_user_id,
             dateOfBirth=_parse_date(row.get("dateOfBirth")),
             gender=Gender(row["gender"]) if row.get("gender") else None,
             status=EmployeeStatus(row.get("status") or EmployeeStatus.ACTIVE.value),
@@ -209,6 +291,8 @@ class EmployeeService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
             )
 
+        self._ensure_fleet_manager_can_access(current, item)
+
         updates = body.model_dump(exclude_unset=True)
         if "email" in updates and updates["email"] is not None:
             updates["email"] = str(updates["email"])
@@ -216,14 +300,34 @@ class EmployeeService:
             updates["dateOfBirth"] = _date_to_str(updates.get("dateOfBirth"))
         if "hireDate" in updates:
             updates["hireDate"] = _date_to_str(updates.get("hireDate"))
+        if "driverManagerUserId" in updates:
+            self._validate_driver_manager_user_id(
+                effective, updates.get("driverManagerUserId")
+            )
+        effective_persona = updates.get("persona")
+        if effective_persona is None and "persona" not in updates:
+            effective_persona = item.get("persona")
+            if effective_persona and not isinstance(effective_persona, str):
+                effective_persona = effective_persona.value  # type: ignore[union-attr]
+        elif effective_persona is not None:
+            effective_persona = effective_persona.value
+        if "driverManagerUserId" in updates and updates["driverManagerUserId"]:
+            persona_str = effective_persona or item.get("persona")
+            if persona_str != EmployeePersona.DRIVER.value:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Driver manager applies only to Driver persona",
+                )
+        if "persona" in updates and updates["persona"] is not None:
+            updates["persona"] = updates["persona"].value
+            if updates["persona"] != EmployeePersona.DRIVER.value:
+                updates["driverManagerUserId"] = None
+            if updates["persona"] == EmployeePersona.DRIVER.value:
+                updates["isDriver"] = True
         if "gender" in updates and updates["gender"] is not None:
             updates["gender"] = updates["gender"].value
         if "status" in updates and updates["status"] is not None:
             updates["status"] = updates["status"].value
-        if "persona" in updates and updates["persona"] is not None:
-            updates["persona"] = updates["persona"].value
-            if updates["persona"] == EmployeePersona.DRIVER.value:
-                updates["isDriver"] = True
         if "dailyHoursWorked" in updates and updates["dailyHoursWorked"] is not None:
             updates["dailyHoursWorked"] = Decimal(str(updates["dailyHoursWorked"]))
 
@@ -354,8 +458,17 @@ class EmployeeService:
             inviteEmailSent=False,
         )
 
-    @staticmethod
-    def _to_response(item: dict) -> EmployeeResponse:
+    def _driver_manager_email(
+        self, tenant_id: str, driver_manager_user_id: str | None
+    ) -> str | None:
+        if not driver_manager_user_id:
+            return None
+        for user in self.repo.list_users_for_tenant(tenant_id):
+            if user.get("userId") == driver_manager_user_id:
+                return user.get("email")
+        return None
+
+    def _to_response(self, item: dict) -> EmployeeResponse:
         gender_raw = item.get("gender")
         gender = None
         if gender_raw:
@@ -379,6 +492,7 @@ class EmployeeService:
         return EmployeeResponse(
             employeeId=item["employeeId"],
             tenantId=item["tenantId"],
+            locationId=item.get("locationId"),
             name=item["name"],
             employeeCode=item.get("employeeCode"),
             dateOfBirth=_parse_date(item.get("dateOfBirth")),
@@ -405,6 +519,10 @@ class EmployeeService:
             department=item.get("department"),
             jobRole=item.get("jobRole"),
             linkedUserId=item.get("linkedUserId"),
+            driverManagerUserId=item.get("driverManagerUserId"),
+            driverManagerEmail=self._driver_manager_email(
+                item["tenantId"], item.get("driverManagerUserId")
+            ),
             createdAt=item["createdAt"],
             updatedAt=item["updatedAt"],
         )

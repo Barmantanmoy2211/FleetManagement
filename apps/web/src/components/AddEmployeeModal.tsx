@@ -1,8 +1,9 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { EMPLOYEE_PERSONAS } from "@fleet/constants";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { EMPLOYEE_PERSONAS, ROLES } from "@fleet/constants";
 import { createEmployeeSchema } from "@fleet/validation";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
+import { useAuthStore } from "@/stores/authStore";
 import { ApiError } from "@fleet/api-client";
 
 const inputClass =
@@ -18,19 +19,59 @@ export function AddEmployeeModal({ open, tenantId, onClose }: Props) {
   const api = useApiClient();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const role = useAuthStore((s) => s.role);
+  const authEmail = useAuthStore((s) => s.email);
 
   const [name, setName] = useState("");
   const [employeeCode, setEmployeeCode] = useState("");
   const [email, setEmail] = useState("");
   const [persona, setPersona] = useState("");
+  const [driverManagerUserId, setDriverManagerUserId] = useState("");
+  const [locationId, setLocationId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+
+  const fleetManagers = useQuery({
+    queryKey: ["users", tenantId],
+    queryFn: () => api.listUsers(tenantId),
+    enabled: open,
+  });
+  const locations = useQuery({
+    queryKey: ["locations", tenantId],
+    queryFn: () => api.listLocations(tenantId),
+    enabled: open,
+  });
+  const managerOptions = (fleetManagers.data ?? []).filter(
+    (u) => u.role === ROLES.FLEET_MANAGER,
+  );
+  const selfManagerUserId = useMemo(() => {
+    const needle = authEmail?.trim().toLowerCase();
+    if (!needle) {
+      return null;
+    }
+    return (
+      fleetManagers.data?.find((u) => u.email.trim().toLowerCase() === needle)
+        ?.userId ?? null
+    );
+  }, [authEmail, fleetManagers.data]);
+
+  useEffect(() => {
+    if (persona !== "Driver") {
+      setDriverManagerUserId("");
+      return;
+    }
+    if (role === ROLES.FLEET_MANAGER && selfManagerUserId) {
+      setDriverManagerUserId(selfManagerUserId);
+    }
+  }, [persona, role, selfManagerUserId]);
 
   function resetForm() {
     setName("");
     setEmployeeCode("");
     setEmail("");
     setPersona("");
+    setDriverManagerUserId("");
+    setLocationId("");
     setFormError(null);
     setImportMessage(null);
     if (fileRef.current) fileRef.current.value = "";
@@ -90,13 +131,17 @@ export function AddEmployeeModal({ open, tenantId, onClose }: Props) {
       employeeCode: employeeCode || undefined,
       email: email || undefined,
       persona: persona || undefined,
+      driverManagerUserId:
+        persona === "Driver" && driverManagerUserId ? driverManagerUserId : undefined,
+      locationId:
+        persona && persona !== "Fleet Admin" && locationId ? locationId : undefined,
       tenantId,
     });
     if (!parsed.success) {
       setFormError(parsed.error.errors[0]?.message ?? "Invalid input");
       return;
     }
-    create.mutate(parsed.data);
+    create.mutate({ ...parsed.data, locationId: locationId || undefined });
   }
 
   if (!open) return null;
@@ -195,7 +240,43 @@ export function AddEmployeeModal({ open, tenantId, onClose }: Props) {
                 ))}
               </select>
             </label>
-          </div>
+            </div>
+          {persona && persona !== "Fleet Admin" && (
+            <label className="block">
+              <span className="text-xs text-slate-400">Location</span>
+              <select
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+                required
+              >
+                <option value="">Select location</option>
+                {(locations.data ?? []).map((loc) => (
+                  <option key={loc.locationId} value={loc.locationId}>
+                    {loc.name}
+                    {loc.city ? ` · ${loc.city}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {persona === "Driver" && (
+            <label className="block">
+              <span className="text-xs text-slate-400">Driver manager (Fleet Manager)</span>
+              <select
+                value={driverManagerUserId}
+                onChange={(e) => setDriverManagerUserId(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              >
+                <option value="">Unassigned</option>
+                {managerOptions.map((u) => (
+                  <option key={u.userId} value={u.userId}>
+                    {u.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block">
             <span className="text-xs text-slate-400">Email (for Create user later)</span>
             <input

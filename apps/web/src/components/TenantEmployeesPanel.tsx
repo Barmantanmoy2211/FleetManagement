@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
 import { AddEmployeeModal } from "@/components/AddEmployeeModal";
 import { TenantEmployeeListTable } from "@/components/TenantEmployeeListTable";
@@ -7,9 +7,10 @@ import { TenantEmployeeListTable } from "@/components/TenantEmployeeListTable";
 type Props = {
   tenantId: string;
   canWrite: boolean;
+  locationId?: string;
 };
 
-export function TenantEmployeesPanel({ tenantId, canWrite }: Props) {
+export function TenantEmployeesPanel({ tenantId, canWrite, locationId }: Props) {
   const api = useApiClient();
   const [addOpen, setAddOpen] = useState(false);
 
@@ -17,6 +18,14 @@ export function TenantEmployeesPanel({ tenantId, canWrite }: Props) {
     queryKey: ["employees", tenantId],
     queryFn: () => api.listEmployees(tenantId),
   });
+
+  const filtered = useMemo(() => {
+    const list = employees.data ?? [];
+    if (!locationId) {
+      return list;
+    }
+    return list.filter((e) => e.locationId === locationId);
+  }, [employees.data, locationId]);
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/30">
@@ -35,7 +44,7 @@ export function TenantEmployeesPanel({ tenantId, canWrite }: Props) {
 
       <TenantEmployeeListTable
         tenantId={tenantId}
-        employees={employees.data ?? []}
+        employees={filtered}
         isLoading={employees.isLoading}
         emptyMessage={
           canWrite

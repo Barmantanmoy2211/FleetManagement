@@ -42,8 +42,9 @@ export function DriversPage() {
     <div>
       <h1 className="text-2xl font-semibold text-white">Drivers</h1>
       <p className="mt-2 max-w-xl text-sm text-slate-400">
-        Fleet driver profiles are created only by importing users with role Driver from the Users
-        page. Invite drivers under Users, then use Import driver users here.
+        {role === ROLES.FLEET_MANAGER
+          ? "Drivers assigned to you (from Employees). Profiles are created automatically for platform users linked to those employees."
+          : "Fleet driver profiles are created by importing users with role Driver from the Users page, or appear when Fleet Managers load assigned drivers."}
       </p>
 
       {isPlatformAdmin && (
@@ -80,8 +81,9 @@ export function DriversPage() {
       {listError && <p className="mt-8 text-sm text-red-400">{listError}</p>}
       {!drivers.isLoading && !listError && drivers.data?.length === 0 && (
         <p className="mt-8 text-sm text-slate-500">
-          No driver profiles yet. Invite users with role Driver on the Users page, then import them
-          here.
+          {role === ROLES.FLEET_MANAGER
+            ? "No drivers assigned to you yet, or assigned drivers do not have a platform user. Link employees under Organization → Employees."
+            : "No driver profiles yet. Invite users with role Driver on the Users page, then import them here."}
         </p>
       )}
       <ul className="mt-8 divide-y divide-slate-800 rounded-xl border border-slate-800">

@@ -9,6 +9,7 @@ import { EditTenantModal } from "@/components/EditTenantModal";
 import { TenantEmployeesPanel } from "@/components/TenantEmployeesPanel";
 import { TenantVehiclesPanel } from "@/components/TenantVehiclesPanel";
 import { TenantEmployeesByPersonaPanel } from "@/components/TenantEmployeesByPersonaPanel";
+import { TenantLocationsPanel } from "@/components/TenantLocationsPanel";
 import { TenantUsersPanel } from "@/components/TenantUsersPanel";
 import {
   buildLinkedEmailSet,
@@ -23,6 +24,7 @@ import {
 function isTenantDetailTabId(value: string | null): value is TenantDetailTabId {
   return (
     value === "details" ||
+    value === "locations" ||
     value === "users" ||
     value === "drivers" ||
     value === "vehicles" ||
@@ -315,17 +317,25 @@ function TabPanel({
 
   if (tab === "details") {
     return (
-      <dl className="rounded-xl border border-slate-800 p-4">
-        <DetailRow label="Tenant ID" value={tenant.tenantId} />
-        <DetailRow label="Address" value={locationLine || "—"} />
-        {tenant.landmark ? <DetailRow label="Landmark" value={tenant.landmark} /> : null}
-        <DetailRow
-          label="Revenue (annual)"
-          value={tenant.revenue != null ? tenant.revenue.toLocaleString() : "—"}
-        />
-        <DetailRow label="Established" value={tenant.establishedDate ?? "—"} />
-        <DetailRow label="Platform onboarding" value={tenant.platformOnboardingDate ?? "—"} />
-      </dl>
+      <>
+        <dl className="rounded-xl border border-slate-800 p-4">
+          <DetailRow label="Tenant ID" value={tenant.tenantId} />
+          <DetailRow label="Address" value={locationLine || "—"} />
+          {tenant.landmark ? <DetailRow label="Landmark" value={tenant.landmark} /> : null}
+          <DetailRow
+            label="Revenue (annual)"
+            value={tenant.revenue != null ? tenant.revenue.toLocaleString() : "—"}
+          />
+          <DetailRow label="Established" value={tenant.establishedDate ?? "—"} />
+          <DetailRow label="Platform onboarding" value={tenant.platformOnboardingDate ?? "—"} />
+        </dl>
+      </>
+    );
+  }
+
+  if (tab === "locations") {
+    return (
+      <TenantLocationsPanel tenantId={tenantId} canManage={canWriteEmployees} />
     );
   }
 

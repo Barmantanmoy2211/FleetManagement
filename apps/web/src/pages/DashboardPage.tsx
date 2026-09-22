@@ -15,23 +15,37 @@ export function DashboardPage() {
     queryFn: () => api.health(),
   });
 
+  const showFleetStats =
+    role === ROLES.FLEET_ADMIN ||
+    role === ROLES.LOCATION_HEAD ||
+    role === ROLES.FLEET_MANAGER ||
+    role === ROLES.VIEWER ||
+    role === ROLES.DRIVER;
+
   const vehicles = useQuery({
     queryKey: ["vehicles", scopeTenant],
     queryFn: () => api.listVehicles(scopeTenant),
-    enabled: Boolean(scopeTenant),
+    enabled: Boolean(scopeTenant) && showFleetStats,
   });
 
   const drivers = useQuery({
     queryKey: ["drivers", scopeTenant],
     queryFn: () => api.listDrivers(scopeTenant),
-    enabled: Boolean(scopeTenant),
+    enabled: Boolean(scopeTenant) && showFleetStats,
   });
 
   const assignments = useQuery({
     queryKey: ["assignments", scopeTenant, "active"],
-    queryFn: () => api.listAssignments(scopeTenant, true),
-    enabled: Boolean(scopeTenant),
+    queryFn: () => api.listAssignments(scopeTenant, { activeOnly: true }),
+    enabled: Boolean(scopeTenant) && showFleetStats,
   });
+
+  const locationHint =
+    role === ROLES.LOCATION_HEAD
+      ? "At your location"
+      : role === ROLES.FLEET_MANAGER
+        ? "In your scope"
+        : "Registered in tenant";
 
   const vehicleCount = role === ROLES.PLATFORM_ADMIN && !scopeTenant
     ? "—"
@@ -56,13 +70,18 @@ export function DashboardPage() {
           Pick a tenant on Vehicles, Drivers, or Assignments to manage fleet data.
         </p>
       )}
+      {role === ROLES.LOCATION_HEAD && (
+        <p className="mt-2 text-sm text-slate-500">
+          Counts and fleet pages are limited to your assigned location.
+        </p>
+      )}
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Vehicles" value={vehicleCount} hint="Registered in tenant" />
-        <StatCard label="Drivers" value={driverCount} hint="Driver profiles" />
+        <StatCard label="Vehicles" value={vehicleCount} hint={locationHint} />
+        <StatCard label="Drivers" value={driverCount} hint={locationHint} />
         <StatCard
           label="Active assignments"
           value={assignmentCount}
-          hint="Driver ↔ vehicle now"
+          hint={locationHint}
         />
       </div>
       <p className="mt-8 text-sm text-slate-500">

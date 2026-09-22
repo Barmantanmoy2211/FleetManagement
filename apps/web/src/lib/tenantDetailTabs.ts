@@ -2,6 +2,7 @@ import { ROLES, type RoleName } from "@fleet/constants";
 
 export type TenantDetailTabId =
   | "details"
+  | "locations"
   | "users"
   | "drivers"
   | "vehicles"
@@ -11,6 +12,7 @@ export type TenantDetailTabId =
 
 export const TENANT_DETAIL_TABS: { id: TenantDetailTabId; label: string }[] = [
   { id: "details", label: "Details" },
+  { id: "locations", label: "Locations" },
   { id: "users", label: "Users" },
   { id: "drivers", label: "Drivers" },
   { id: "vehicles", label: "Vehicles" },
@@ -24,10 +26,21 @@ export function visibleTenantDetailTabs(role: RoleName | null): TenantDetailTabI
     return TENANT_DETAIL_TABS.map((t) => t.id);
   }
   if (role === ROLES.FLEET_ADMIN) {
-    return ["details", "users", "drivers", "vehicles", "employees", "fleet-managers"];
+    return [
+      "details",
+      "locations",
+      "users",
+      "drivers",
+      "vehicles",
+      "employees",
+      "fleet-managers",
+    ];
   }
   if (role === ROLES.FLEET_MANAGER) {
     return ["users", "drivers", "vehicles", "employees"];
+  }
+  if (role === ROLES.LOCATION_HEAD) {
+    return ["users", "drivers", "vehicles", "employees", "fleet-managers"];
   }
   return [];
 }
@@ -40,6 +53,8 @@ export function formatUserRole(role: string): string {
   switch (role) {
     case ROLES.FLEET_ADMIN:
       return "Fleet Admin";
+    case ROLES.LOCATION_HEAD:
+      return "Location Head";
     case ROLES.FLEET_MANAGER:
       return "Fleet Manager";
     case ROLES.DRIVER:

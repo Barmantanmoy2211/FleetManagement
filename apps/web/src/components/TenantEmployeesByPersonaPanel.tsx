@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { EmployeePersona } from "@fleet/types";
+import type { EmployeePersona, UserProfile } from "@fleet/types";
+import { ROLES } from "@fleet/constants";
 import { useApiClient } from "@/hooks/useApiClient";
+import { useAuthStore } from "@/stores/authStore";
 import { TenantEmployeeListTable } from "@/components/TenantEmployeeListTable";
 import { BulkCreateUsersModal } from "@/components/BulkCreateUsersModal";
 import {
@@ -15,6 +17,7 @@ type Props = {
   title: string;
   canWrite: boolean;
   addButtonLabel: string;
+  locationId?: string;
 };
 
 export function TenantEmployeesByPersonaPanel({
@@ -23,9 +26,18 @@ export function TenantEmployeesByPersonaPanel({
   title,
   canWrite,
   addButtonLabel,
+  locationId,
 }: Props) {
   const api = useApiClient();
   const [bulkOpen, setBulkOpen] = useState(false);
+  const role = useAuthStore((s) => s.role);
+  const authEmail = useAuthStore((s) => s.email);
+
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: role === ROLES.FLEET_MANAGER,
+  });
 
   const employees = useQuery({
     queryKey: ["employees", tenantId],
@@ -41,27 +53,66 @@ export function TenantEmployeesByPersonaPanel({
     [users.data],
   );
 
+  const managerUserId = useMemo(() => {
+    if (role !== ROLES.FLEET_MANAGER) {
+      return null;
+    }
+    if (me.data?.userId) {
+      return me.data.userId;
+    }
+    const needle = authEmail?.trim().toLowerCase();
+    if (!needle) {
+      return null;
+    }
+    return (
+      users.data?.find((u) => u.email.trim().toLowerCase() === needle)?.userId ??
+      null
+    );
+  }, [role, me.data?.userId, authEmail, users.data]);
+
+  const scopedEmployees = useMemo(() => {
+    let list = employees.data ?? [];
+    if (locationId) {
+      list = list.filter((e) => e.locationId === locationId);
+    }
+    if (role === ROLES.FLEET_MANAGER && persona === "Driver") {
+      if (!managerUserId) {
+        return [];
+      }
+      return list.filter((e) => e.driverManagerUserId === managerUserId);
+    }
+    return list;
+  }, [employees.data, role, persona, managerUserId, locationId]);
+
   const linked = useMemo(
     () =>
       filterEmployeesByPersonaAndLinked(
-        employees.data ?? [],
+        scopedEmployees,
         persona,
         linkedEmails,
         true,
       ),
-    [employees.data, persona, linkedEmails],
+    [scopedEmployees, persona, linkedEmails],
   );
 
   const pending = useMemo(
     () =>
       filterEmployeesByPersonaAndLinked(
-        employees.data ?? [],
+        scopedEmployees,
         persona,
         linkedEmails,
         false,
       ),
-    [employees.data, persona, linkedEmails],
+    [scopedEmployees, persona, linkedEmails],
   );
+
+  const usersById = useMemo(() => {
+    const map = new Map<string, UserProfile>();
+    for (const u of users.data ?? []) {
+      map.set(u.userId, u);
+    }
+    return map;
+  }, [users.data]);
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/30">
@@ -89,6 +140,8 @@ export function TenantEmployeesByPersonaPanel({
         isLoading={employees.isLoading || users.isLoading}
         emptyMessage={`No ${title.toLowerCase()} with a platform user yet. Use "${addButtonLabel}" to create users from employees.`}
         showPersona={false}
+        showDriverManager={persona === "Driver"}
+        usersById={usersById}
       />
 
       <BulkCreateUsersModal

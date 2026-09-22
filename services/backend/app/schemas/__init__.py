@@ -70,6 +70,9 @@ class UserResponse(BaseModel):
     email: EmailStr
     role: Role
     cognitoSub: str
+    locationId: str | None = None
+    reportsToUserId: str | None = None
+    timeZone: str | None = None
     createdAt: str
     updatedAt: str
 
@@ -78,6 +81,8 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     role: Role
     tenantId: str | None = None
+    locationId: str | None = None
+    reportsToUserId: str | None = None
     temporaryPassword: str | None = Field(default=None, min_length=8)
 
 
@@ -93,6 +98,11 @@ class MeResponse(BaseModel):
     tenantId: str | None
     email: str
     role: Role
+    timeZone: str = "Asia/Kolkata"
+
+
+class UpdateMeRequest(BaseModel):
+    timeZone: str = Field(min_length=1, max_length=64)
 
 
 class TenantDetailResponse(BaseModel):

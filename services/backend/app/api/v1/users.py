@@ -7,13 +7,18 @@ from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+USER_READ_ROLES = (
+    Role.PLATFORM_ADMIN,
+    Role.FLEET_ADMIN,
+    Role.LOCATION_HEAD,
+    Role.FLEET_MANAGER,
+)
+
 
 @router.get("", response_model=list[UserResponse])
 def list_users(
     tenant_id: str | None = Query(default=None, alias="tenantId"),
-    current: CurrentUser = Depends(
-        require_roles(Role.PLATFORM_ADMIN, Role.FLEET_ADMIN),
-    ),
+    current: CurrentUser = Depends(require_roles(*USER_READ_ROLES)),
 ) -> list[UserResponse]:
     return UserService().list_users(current, tenant_id)
 

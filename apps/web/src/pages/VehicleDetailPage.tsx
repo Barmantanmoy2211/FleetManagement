@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Vehicle } from "@fleet/types";
 import { ROLES } from "@fleet/constants";
-import { useState } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
 import { useAuthStore } from "@/stores/authStore";
 import { EditVehicleModal } from "@/components/EditVehicleModal";
+import { EntityAssignmentsPanel } from "@/components/EntityAssignmentsPanel";
+import { RecordDetailTabs } from "@/components/RecordDetailTabs";
 import { ApiError } from "@fleet/api-client";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -113,11 +115,17 @@ export function VehicleDetailPage() {
   const tenantId = useAuthStore((s) => s.tenantId);
   const isPlatformAdmin = role === ROLES.PLATFORM_ADMIN;
   const canWrite = role === ROLES.PLATFORM_ADMIN || role === ROLES.FLEET_ADMIN;
+  const canAssign =
+    role === ROLES.PLATFORM_ADMIN ||
+    role === ROLES.FLEET_ADMIN ||
+    role === ROLES.LOCATION_HEAD ||
+    role === ROLES.FLEET_MANAGER;
   const effectiveTenantId = isPlatformAdmin ? queryTenantId : tenantId ?? undefined;
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"details" | "assignments">("details");
 
   const vehicle = useQuery({
     queryKey: ["vehicle", vehicleId, queryTenantId, tenantId],
@@ -220,7 +228,26 @@ export function VehicleDetailPage() {
             </dl>
           </div>
 
-          <VehicleDetailsSections v={v} />
+          <RecordDetailTabs
+            tabs={[
+              { id: "details", label: "Details" },
+              { id: "assignments", label: "Driver assignment" },
+            ]}
+            activeId={detailTab}
+            onChange={(id) => setDetailTab(id as "details" | "assignments")}
+          />
+
+          {detailTab === "details" && <VehicleDetailsSections v={v} />}
+
+          {detailTab === "assignments" && effectiveTenantId && (
+            <EntityAssignmentsPanel
+              tenantId={effectiveTenantId}
+              canAssign={canAssign}
+              fixedVehicleId={vehicleId}
+              listVehicleId={vehicleId}
+              embedded
+            />
+          )}
 
           {canWrite && (
             <EditVehicleModal

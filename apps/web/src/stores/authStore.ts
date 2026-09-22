@@ -7,6 +7,7 @@ import {
 } from "aws-amplify/auth";
 import { ROLES, type RoleName } from "@fleet/constants";
 import { create } from "zustand";
+import { getApiBaseUrl } from "@/lib/amplify";
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -27,6 +28,7 @@ function roleFromGroups(groups: string[] | undefined): RoleName | null {
   const order: RoleName[] = [
     ROLES.PLATFORM_ADMIN,
     ROLES.FLEET_ADMIN,
+    ROLES.LOCATION_HEAD,
     ROLES.FLEET_MANAGER,
     ROLES.DRIVER,
     ROLES.VIEWER,
@@ -58,13 +60,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         : groupsRaw
           ? [String(groupsRaw)]
           : [];
+      let tenantId = (payload?.["custom:tenant_id"] as string) || null;
+      let role = roleFromGroups(groups);
+      if (token) {
+        try {
+          const { API_V1_PREFIX } = await import("@fleet/constants");
+          const res = await fetch(`${getApiBaseUrl()}${API_V1_PREFIX}/me`, {
+            headers: { Authorization: `Bearer ${token.toString()}` },
+          });
+          if (res.ok) {
+            const me = (await res.json()) as {
+              tenantId?: string | null;
+              role?: RoleName;
+            };
+            if (me.tenantId) {
+              tenantId = me.tenantId;
+            }
+            if (me.role && !role) {
+              role = me.role;
+            }
+          }
+        } catch {
+          /* use token claims only */
+        }
+      }
       set({
         isAuthenticated: true,
         isLoading: false,
         email: (payload?.email as string) || user.signInDetails?.loginId || null,
         userId: user.userId,
-        role: roleFromGroups(groups),
-        tenantId: (payload?.["custom:tenant_id"] as string) || null,
+        role,
+        tenantId,
         error: null,
       });
     } catch {

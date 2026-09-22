@@ -22,6 +22,7 @@ router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 READ_ROLES = (
     Role.PLATFORM_ADMIN,
     Role.FLEET_ADMIN,
+    Role.LOCATION_HEAD,
     Role.FLEET_MANAGER,
     Role.VIEWER,
     Role.DRIVER,

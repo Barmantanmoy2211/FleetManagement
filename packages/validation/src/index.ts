@@ -4,6 +4,7 @@ import { z } from "zod";
 const roleEnum = z.enum([
   ROLES.PLATFORM_ADMIN,
   ROLES.FLEET_ADMIN,
+  ROLES.LOCATION_HEAD,
   ROLES.FLEET_MANAGER,
   ROLES.DRIVER,
   ROLES.VIEWER,
@@ -40,6 +41,8 @@ export const createUserSchema = z.object({
   role: roleEnum,
   tenantId: z.string().uuid().optional(),
   temporaryPassword: z.string().min(8).optional(),
+  locationId: z.string().uuid().optional().nullable(),
+  reportsToUserId: z.string().uuid().optional().nullable(),
 });
 
 const vehicleTypeEnum = z.enum(VEHICLE_TYPES);
@@ -83,11 +86,44 @@ export const createDriverSchema = z.object({
   tenantId: z.string().uuid().optional(),
 });
 
-export const createAssignmentSchema = z.object({
-  driverId: z.string().uuid(),
-  vehicleId: z.string().uuid(),
-  tenantId: z.string().uuid().optional(),
-});
+export const createAssignmentSchema = z
+  .object({
+    driverId: z.string().uuid(),
+    vehicleId: z.string().uuid(),
+    changeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    releaseDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .nullable(),
+    tenantId: z.string().uuid().optional(),
+  })
+  .refine(
+    (data) => !data.releaseDate || data.releaseDate >= data.changeDate,
+    { message: "Release date cannot be before change date", path: ["releaseDate"] },
+  );
+
+export const updateAssignmentSchema = z
+  .object({
+    changeDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    releaseDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .nullable(),
+  })
+  .refine(
+    (data) =>
+      !data.changeDate ||
+      !data.releaseDate ||
+      data.releaseDate >= data.changeDate,
+    { message: "Release date cannot be before change date", path: ["releaseDate"] },
+  );
+
+export type UpdateAssignmentInput = z.infer<typeof updateAssignmentSchema>;
 
 const employeeStatusEnum = z.enum(EMPLOYEE_STATUSES);
 const genderEnum = z.enum(GENDERS);
@@ -119,6 +155,8 @@ export const createEmployeeSchema = z.object({
   companyDriverId: z.string().max(64).optional(),
   department: z.string().max(120).optional(),
   jobRole: z.string().max(120).optional(),
+  driverManagerUserId: z.string().uuid().optional().nullable(),
+  locationId: z.string().uuid().optional().nullable(),
   tenantId: z.string().uuid().optional(),
 });
 

@@ -15,6 +15,7 @@ from app.schemas import (
     UserResponse,
 )
 from app.services.fleet_service import DriverService, VehicleService
+from app.services.location_scope import repo_location_filter
 from app.services.user_service import UserService
 
 
@@ -31,7 +32,7 @@ def _date_to_str(value: date | None) -> str | None:
 def _ensure_tenant_detail_access(current: CurrentUser, tenant_id: str) -> None:
     if current.role == Role.PLATFORM_ADMIN:
         return
-    if current.role not in (Role.FLEET_ADMIN, Role.FLEET_MANAGER):
+    if current.role not in (Role.FLEET_ADMIN, Role.FLEET_MANAGER, Role.LOCATION_HEAD):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions",
@@ -78,6 +79,18 @@ class TenantService:
 
         if current.role == Role.FLEET_MANAGER:
             visible_users = all_users
+        elif current.role == Role.LOCATION_HEAD:
+            loc_id = current.location_id
+            visible_users = [
+                u
+                for u in all_users
+                if loc_id
+                and (
+                    u.locationId == loc_id
+                    or u.role == Role.FLEET_ADMIN
+                )
+            ]
+            fleet_managers = [u for u in visible_users if u.role == Role.FLEET_MANAGER]
         elif current.role == Role.FLEET_ADMIN:
             visible_users = all_users
             fleet_managers = [u for u in all_users if u.role == Role.FLEET_MANAGER]
@@ -85,13 +98,24 @@ class TenantService:
             visible_users = all_users
             fleet_admins = [u for u in all_users if u.role == Role.FLEET_ADMIN]
             fleet_managers = [u for u in all_users if u.role == Role.FLEET_MANAGER]
+        self.repo.backfill_tenant_location_ids(tenant_id)
+        loc = repo_location_filter(self.repo, current, tenant_id)
         drivers = [
-            DriverService._to_response(d) for d in self.repo.list_drivers_for_tenant(tenant_id)
+            DriverService._to_response(d)
+            for d in self.repo.list_drivers_for_tenant(tenant_id, location_id=loc)
         ]
         vehicles = [
-            VehicleService._to_response(v) for v in self.repo.list_vehicles_for_tenant(tenant_id)
+            VehicleService._to_response(v)
+            for v in self.repo.list_vehicles_for_tenant(tenant_id, location_id=loc)
         ]
-        linked_driver_count = self._count_linked_driver_employees(tenant_id, users)
+        linked_driver_count = self._count_linked_driver_employees(
+            tenant_id,
+            users,
+            manager_user_id=current.user_id
+            if current.role == Role.FLEET_MANAGER
+            else None,
+            location_id=loc,
+        )
 
         return TenantDetailResponse(
             tenant=self._to_response(item),
@@ -116,6 +140,7 @@ class TenantService:
             revenue=body.revenue,
             established_date=_date_to_str(body.establishedDate),
         )
+        self.repo.ensure_primary_location(item["tenantId"])
         self.repo.write_audit(
             tenant_id=item["tenantId"],
             actor_user_id=actor_user_id,
@@ -183,7 +208,14 @@ class TenantService:
         )
         return self._to_response(updated)
 
-    def _count_linked_driver_employees(self, tenant_id: str, users: list[dict]) -> int:
+    def _count_linked_driver_employees(
+        self,
+        tenant_id: str,
+        users: list[dict],
+        *,
+        manager_user_id: str | None = None,
+        location_id: str | None = None,
+    ) -> int:
         """Drivers tab: employees with Driver persona who have a platform user."""
         user_emails = {
             (u.get("email") or "").strip().lower()
@@ -191,8 +223,10 @@ class TenantService:
             if u.get("email")
         }
         count = 0
-        for emp in self.repo.list_employees_for_tenant(tenant_id):
+        for emp in self.repo.list_employees_for_tenant(tenant_id, location_id=location_id):
             if emp.get("persona") != EmployeePersona.DRIVER.value:
+                continue
+            if manager_user_id and emp.get("driverManagerUserId") != manager_user_id:
                 continue
             if emp.get("linkedUserId"):
                 count += 1

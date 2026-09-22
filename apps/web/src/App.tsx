@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AssignmentDetailPage } from "@/pages/AssignmentDetailPage";
 import { AssignmentsPage } from "@/pages/AssignmentsPage";
 import { EmployeeDetailPage } from "@/pages/EmployeeDetailPage";
 import { EmployeesPage } from "@/pages/EmployeesPage";
@@ -8,8 +9,12 @@ import { DriversPage } from "@/pages/DriversPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ProfilePage } from "@/pages/ProfilePage";
-import { TenantDetailPage } from "@/pages/TenantDetailPage";
+import { LiveMapPage } from "@/pages/LiveMapPage";
+import { TripDetailPage } from "@/pages/TripDetailPage";
+import { TripsPage } from "@/pages/TripsPage";
 import { TenantsPage } from "@/pages/TenantsPage";
+import { TenantDetailPage } from "@/pages/TenantDetailPage";
+import { LocationDetailPage } from "@/pages/LocationDetailPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { VehicleDetailPage } from "@/pages/VehicleDetailPage";
 import { VehiclesPage } from "@/pages/VehiclesPage";
@@ -33,6 +38,7 @@ function RoleRoute({
 const FLEET_READ = [
   ROLES.PLATFORM_ADMIN,
   ROLES.FLEET_ADMIN,
+  ROLES.LOCATION_HEAD,
   ROLES.FLEET_MANAGER,
   ROLES.VIEWER,
   ROLES.DRIVER,
@@ -51,10 +57,29 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route index element={<DashboardPage />} />
         <Route
+          path="tenants/:tenantId/locations/:locationId"
+          element={
+            <RoleRoute
+              allowed={[
+                ROLES.PLATFORM_ADMIN,
+                ROLES.FLEET_ADMIN,
+                ROLES.LOCATION_HEAD,
+              ]}
+            >
+              <LocationDetailPage />
+            </RoleRoute>
+          }
+        />
+        <Route
           path="tenants/:tenantId"
           element={
             <RoleRoute
-              allowed={[ROLES.PLATFORM_ADMIN, ROLES.FLEET_ADMIN, ROLES.FLEET_MANAGER]}
+              allowed={[
+                ROLES.PLATFORM_ADMIN,
+                ROLES.FLEET_ADMIN,
+                ROLES.FLEET_MANAGER,
+                ROLES.LOCATION_HEAD,
+              ]}
             >
               <TenantDetailPage />
             </RoleRoute>
@@ -113,6 +138,38 @@ export default function App() {
           element={
             <RoleRoute allowed={FLEET_READ}>
               <EmployeesPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="trips/:tripId"
+          element={
+            <RoleRoute allowed={FLEET_READ}>
+              <TripDetailPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="trips"
+          element={
+            <RoleRoute allowed={FLEET_READ}>
+              <TripsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="live-map"
+          element={
+            <RoleRoute allowed={FLEET_READ}>
+              <LiveMapPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="assignments/:assignmentId"
+          element={
+            <RoleRoute allowed={FLEET_READ}>
+              <AssignmentDetailPage />
             </RoleRoute>
           }
         />

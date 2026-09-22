@@ -149,6 +149,142 @@ def test_delete_employee_marks_inactive(client, ddb_table):
     assert deleted.json()["status"] == "INACTIVE"
 
 
+def test_fleet_manager_sees_only_assigned_drivers(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="FM Scope Co")
+    tid = tenant["tenantId"]
+    fm_a = repo.create_user_profile(
+        tenant_id=tid,
+        email="fm-a@example.com",
+        role=Role.FLEET_MANAGER,
+        cognito_sub="sub-fm-a",
+        user_id="fm-a-id",
+    )
+    fm_b = repo.create_user_profile(
+        tenant_id=tid,
+        email="fm-b@example.com",
+        role=Role.FLEET_MANAGER,
+        cognito_sub="sub-fm-b",
+        user_id="fm-b-id",
+    )
+    admin = _dev_user_header(
+        userId="fa-fm-scope",
+        role=Role.FLEET_ADMIN.value,
+        tenantId=tid,
+        email="admin@fm-scope.com",
+    )
+    d1 = client.post(
+        "/api/v1/employees",
+        headers=admin,
+        json={
+            "name": "Driver A",
+            "persona": "Driver",
+            "driverManagerUserId": fm_a["userId"],
+        },
+    )
+    d2 = client.post(
+        "/api/v1/employees",
+        headers=admin,
+        json={
+            "name": "Driver B",
+            "persona": "Driver",
+            "driverManagerUserId": fm_b["userId"],
+        },
+    )
+    assert d1.status_code == 201, d1.text
+    assert d2.status_code == 201, d2.text
+    driver_a_id = d1.json()["employeeId"]
+    repo.create_user_profile(
+        tenant_id=tid,
+        email="driver-a@example.com",
+        role=Role.DRIVER,
+        cognito_sub="sub-driver-a",
+        user_id="driver-a-user",
+    )
+    repo.update_employee(
+        tid,
+        driver_a_id,
+        {
+            "email": "driver-a@example.com",
+            "linkedUserId": "driver-a-user",
+        },
+    )
+
+    fm_a_header = _dev_user_header(
+        userId="wrong-sub-id",
+        cognitoSub="sub-fm-a",
+        role=Role.FLEET_MANAGER.value,
+        tenantId=tid,
+        email=fm_a["email"],
+    )
+    listed = client.get(f"/api/v1/employees?tenantId={tid}", headers=fm_a_header)
+    assert listed.status_code == 200, listed.text
+    driver_names = {e["name"] for e in listed.json() if e.get("persona") == "Driver"}
+    assert driver_names == {"Driver A"}
+
+    tenant_detail = client.get(f"/api/v1/tenants/{tid}", headers=fm_a_header)
+    assert tenant_detail.status_code == 200, tenant_detail.text
+    assert tenant_detail.json().get("linkedDriverCount") == 1
+
+    other = client.get(
+        f"/api/v1/employees/{d2.json()['employeeId']}?tenantId={tid}",
+        headers=fm_a_header,
+    )
+    assert other.status_code == 404
+
+
+def test_driver_manager_must_be_fleet_manager_user(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="Validate FM Co")
+    tid = tenant["tenantId"]
+    driver_user = repo.create_user_profile(
+        tenant_id=tid,
+        email="driver@example.com",
+        role=Role.DRIVER,
+        cognito_sub="sub-driver",
+        user_id="driver-user-id",
+    )
+    admin = _dev_user_header(
+        userId="fa-val",
+        role=Role.FLEET_ADMIN.value,
+        tenantId=tid,
+        email="admin@validate.com",
+    )
+    res = client.post(
+        "/api/v1/employees",
+        headers=admin,
+        json={
+            "name": "Bad Assign",
+            "persona": "Driver",
+            "driverManagerUserId": driver_user["userId"],
+        },
+    )
+    assert res.status_code == 400
+
+
+def test_fleet_manager_can_list_users(client, ddb_table):
+    repo = DynamoDBRepository(table_name="test-fleet-operational")
+    tenant = repo.create_tenant(name="FM Users Co")
+    tid = tenant["tenantId"]
+    repo.create_user_profile(
+        tenant_id=tid,
+        email="fm@example.com",
+        role=Role.FLEET_MANAGER,
+        cognito_sub="sub-fm-users",
+        user_id="fm-users-id",
+    )
+    fm = _dev_user_header(
+        userId="ignored",
+        cognitoSub="sub-fm-users",
+        role=Role.FLEET_MANAGER.value,
+        tenantId=tid,
+        email="fm@example.com",
+    )
+    res = client.get(f"/api/v1/users?tenantId={tid}", headers=fm)
+    assert res.status_code == 200, res.text
+    assert any(u["email"] == "fm@example.com" for u in res.json())
+
+
 def test_viewer_cannot_create_employee(client, ddb_table):
     repo = DynamoDBRepository(table_name="test-fleet-operational")
     tenant = repo.create_tenant(name="HR Co")

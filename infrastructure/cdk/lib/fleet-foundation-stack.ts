@@ -19,6 +19,7 @@ const ROLES = [
   "PlatformAdmin",
   "FleetAdmin",
   "FleetManager",
+  "LocationHead",
   "Driver",
   "Viewer",
 ];

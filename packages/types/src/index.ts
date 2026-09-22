@@ -6,6 +6,7 @@ import type {
   FuelType,
   Gender,
   LeaseOwnershipType,
+  TripStatus,
   VehicleStatus,
   VehicleType,
 } from "@fleet/constants";
@@ -18,6 +19,7 @@ export type {
   FuelType,
   Gender,
   LeaseOwnershipType,
+  TripStatus,
   VehicleStatus,
   VehicleType,
 };
@@ -33,6 +35,7 @@ export {
   FUEL_TYPES,
   GENDERS,
   LEASE_OWNERSHIP_TYPES,
+  TRIP_STATUSES,
   VEHICLE_STATUSES,
   VEHICLE_TYPES,
 } from "@fleet/constants";
@@ -40,6 +43,7 @@ export {
 export const ROLE_NAMES = [
   "PlatformAdmin",
   "FleetAdmin",
+  "LocationHead",
   "FleetManager",
   "Driver",
   "Viewer",
@@ -63,12 +67,60 @@ export interface Tenant {
   updatedAt: string;
 }
 
+export interface TenantLocation {
+  locationId: string;
+  tenantId: string;
+  name: string;
+  code?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  status: "ACTIVE" | "INACTIVE";
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateLocationRequest {
+  name: string;
+  code?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  tenantId?: string;
+}
+
+export interface UpdateLocationRequest {
+  name?: string;
+  code?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  status?: "ACTIVE" | "INACTIVE";
+}
+
+export interface OrgChartNode {
+  nodeId: string;
+  kind: string;
+  label: string;
+  role?: RoleName;
+  locationName?: string | null;
+  isSelf?: boolean;
+  children?: OrgChartNode[];
+}
+
 export interface UserProfile {
   userId: string;
   tenantId: string;
   email: string;
   role: RoleName;
   cognitoSub: string;
+  locationId?: string | null;
+  reportsToUserId?: string | null;
+  timeZone?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +135,11 @@ export interface MeResponse {
   tenantId: string | null;
   email: string;
   role: RoleName;
+  timeZone?: string;
+}
+
+export interface UpdateMeRequest {
+  timeZone: string;
 }
 
 export interface CreateTenantRequest {
@@ -115,6 +172,8 @@ export interface CreateUserRequest {
   email: string;
   role: RoleName;
   tenantId?: string;
+  locationId?: string;
+  reportsToUserId?: string;
   temporaryPassword?: string;
 }
 
@@ -126,6 +185,7 @@ export interface HealthResponse {
 export interface Vehicle {
   vehicleId: string;
   tenantId: string;
+  locationId?: string | null;
   vehicleName: string;
   displayVehicleId?: string;
   registrationNumber: string;
@@ -148,6 +208,8 @@ export interface Vehicle {
   odometerKm?: number | null;
   currentDriverId?: string | null;
   currentAssignmentId?: string | null;
+  lastLatitude?: number | null;
+  lastLongitude?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,6 +234,7 @@ export interface CreateVehicleRequest {
   status?: VehicleStatus;
   odometerKm?: number;
   tenantId?: string;
+  locationId?: string;
 }
 
 export interface UpdateVehicleRequest {
@@ -205,6 +268,7 @@ export interface ImportVehiclesResponse {
 export interface Driver {
   driverId: string;
   tenantId: string;
+  locationId?: string | null;
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -216,6 +280,7 @@ export interface Driver {
   joiningDate?: string | null;
   currentVehicleId?: string | null;
   currentAssignmentId?: string | null;
+  linkedUserId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -247,8 +312,11 @@ export interface UpdateDriverRequest {
 export interface Assignment {
   assignmentId: string;
   tenantId: string;
+  locationId?: string | null;
   driverId: string;
   vehicleId: string;
+  changeDate: string;
+  releaseDate?: string | null;
   startTime: string;
   endTime?: string | null;
   status: AssignmentStatus;
@@ -260,7 +328,76 @@ export interface Assignment {
 export interface CreateAssignmentRequest {
   driverId: string;
   vehicleId: string;
+  changeDate: string;
+  releaseDate?: string | null;
   tenantId?: string;
+}
+
+export interface UpdateAssignmentRequest {
+  changeDate?: string;
+  releaseDate?: string | null;
+}
+
+export interface Trip {
+  tripId: string;
+  tenantId: string;
+  locationId?: string | null;
+  assignmentId: string;
+  driverId: string;
+  vehicleId: string;
+  status: TripStatus;
+  /** Present on trips created after scheduling; legacy trips use startTime only. */
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
+  actualStartTime?: string | null;
+  pickupLatitude: number;
+  pickupLongitude: number;
+  destinationLatitude: number;
+  destinationLongitude: number;
+  routeDistanceKm: number;
+  /** Minutes from actual start to end; set when trip is completed. */
+  timeTakenMinutes?: number | null;
+  /** Liters consumed; required when completing a trip. */
+  fuelRequiredLiters?: number | null;
+  startTime: string;
+  endTime?: string | null;
+  lastLatitude?: number | null;
+  lastLongitude?: number | null;
+  startedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTripRequest {
+  assignmentId: string;
+  scheduledStartTime: string;
+  scheduledEndTime: string;
+  pickupLatitude: number;
+  pickupLongitude: number;
+  destinationLatitude: number;
+  destinationLongitude: number;
+  tenantId?: string;
+}
+
+export interface UpdateTripRequest {
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
+  pickupLatitude?: number;
+  pickupLongitude?: number;
+  destinationLatitude?: number;
+  destinationLongitude?: number;
+}
+
+export type StartTripRequest = CreateTripRequest;
+
+export interface UpdateTripLocationRequest {
+  latitude: number;
+  longitude: number;
+}
+
+export interface EndTripRequest {
+  cancel?: boolean;
+  fuelRequiredLiters?: number;
 }
 
 export interface DriverImportCandidate {
@@ -288,6 +425,7 @@ export interface TenantDetail {
 export interface Employee {
   employeeId: string;
   tenantId: string;
+  locationId?: string | null;
   name: string;
   employeeCode?: string | null;
   dateOfBirth?: string | null;
@@ -315,6 +453,8 @@ export interface Employee {
   department?: string | null;
   jobRole?: string | null;
   linkedUserId?: string | null;
+  driverManagerUserId?: string | null;
+  driverManagerEmail?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -345,6 +485,8 @@ export interface CreateEmployeeRequest {
   companyDriverId?: string;
   department?: string;
   jobRole?: string;
+  driverManagerUserId?: string;
+  locationId?: string;
   tenantId?: string;
 }
 
@@ -375,6 +517,7 @@ export interface UpdateEmployeeRequest {
   department?: string;
   jobRole?: string;
   linkedUserId?: string;
+  driverManagerUserId?: string | null;
 }
 
 export interface ImportEmployeesResponse {

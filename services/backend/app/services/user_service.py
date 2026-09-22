@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.dependencies import CurrentUser
 from app.models import Role
 from app.repositories.dynamodb import DynamoDBRepository
-from app.schemas import CreateUserRequest, CreateUserResponse, UserResponse
+from app.schemas import CreateUserRequest, CreateUserResponse, MeResponse, UserResponse
 
 
 def _temp_password(length: int = 12) -> str:
@@ -84,6 +84,8 @@ class UserService:
             email=body.email,
             role=body.role,
             cognito_sub=cognito_sub,
+            location_id=body.locationId,
+            reports_to_user_id=body.reportsToUserId,
         )
         self.repo.write_audit(
             tenant_id=effective_tenant,
@@ -109,6 +111,43 @@ class UserService:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found in tenant store",
+        )
+
+    def update_me(self, current: CurrentUser, time_zone: str) -> MeResponse:
+        profile = self.repo.get_user_by_cognito_sub(current.cognito_sub)
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User profile not found",
+            )
+        updated = self.repo.update_user_profile(
+            profile["tenantId"],
+            profile["userId"],
+            {"timeZone": time_zone.strip()},
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not update profile",
+            )
+        return MeResponse(
+            userId=current.user_id,
+            tenantId=updated["tenantId"],
+            email=updated.get("email") or current.email or "",
+            role=current.role,
+            timeZone=updated.get("timeZone") or "Asia/Kolkata",
+        )
+
+    def me_response(self, current: CurrentUser, profile: UserResponse | None) -> MeResponse:
+        tz = "Asia/Kolkata"
+        if profile and profile.timeZone:
+            tz = profile.timeZone
+        return MeResponse(
+            userId=current.user_id,
+            tenantId=profile.tenantId if profile else current.tenant_id,
+            email=current.email or (profile.email if profile else ""),
+            role=current.role,
+            timeZone=tz,
         )
 
     def _resolve_tenant(self, current: CurrentUser, requested: str | None) -> str:
@@ -139,6 +178,9 @@ class UserService:
             email=item["email"],
             role=Role(item["role"]),
             cognitoSub=item["cognitoSub"],
+            locationId=item.get("locationId"),
+            reportsToUserId=item.get("reportsToUserId"),
+            timeZone=item.get("timeZone"),
             createdAt=item["createdAt"],
             updatedAt=item["updatedAt"],
         )

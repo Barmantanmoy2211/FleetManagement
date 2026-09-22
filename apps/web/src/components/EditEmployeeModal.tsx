@@ -1,6 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Employee } from "@fleet/types";
-import { EMPLOYEE_PERSONAS, EMPLOYEE_STATUSES } from "@fleet/constants";
+import { EMPLOYEE_PERSONAS, EMPLOYEE_STATUSES, ROLES } from "@fleet/constants";
 import { updateEmployeeSchema } from "@fleet/validation";
 import { useEffect, useState } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
@@ -24,8 +24,26 @@ export function EditEmployeeModal({ open, employee, tenantId, onClose }: Props) 
   const [email, setEmail] = useState(employee.email ?? "");
   const [phone, setPhone] = useState(employee.phone ?? "");
   const [persona, setPersona] = useState(employee.persona ?? "");
+  const [driverManagerUserId, setDriverManagerUserId] = useState(
+    employee.driverManagerUserId ?? "",
+  );
+  const [locationId, setLocationId] = useState(employee.locationId ?? "");
   const [status, setStatus] = useState(employee.status);
   const [error, setError] = useState<string | null>(null);
+
+  const fleetManagers = useQuery({
+    queryKey: ["users", tenantId],
+    queryFn: () => api.listUsers(tenantId),
+    enabled: open,
+  });
+  const locations = useQuery({
+    queryKey: ["locations", tenantId],
+    queryFn: () => api.listLocations(tenantId),
+    enabled: open,
+  });
+  const managerOptions = (fleetManagers.data ?? []).filter(
+    (u) => u.role === ROLES.FLEET_MANAGER,
+  );
 
   useEffect(() => {
     if (open) {
@@ -34,6 +52,8 @@ export function EditEmployeeModal({ open, employee, tenantId, onClose }: Props) 
       setEmail(employee.email ?? "");
       setPhone(employee.phone ?? "");
       setPersona(employee.persona ?? "");
+      setDriverManagerUserId(employee.driverManagerUserId ?? "");
+      setLocationId(employee.locationId ?? "");
       setStatus(employee.status);
       setError(null);
     }
@@ -64,6 +84,12 @@ export function EditEmployeeModal({ open, employee, tenantId, onClose }: Props) 
       phone: phone || undefined,
       persona: persona || undefined,
       status,
+      driverManagerUserId:
+        persona === "Driver"
+          ? driverManagerUserId || null
+          : null,
+      locationId:
+        persona && persona !== "Fleet Admin" ? locationId || null : null,
     });
     if (!parsed.success) {
       setError(parsed.error.errors[0]?.message ?? "Invalid input");
@@ -124,6 +150,40 @@ export function EditEmployeeModal({ open, employee, tenantId, onClose }: Props) 
               ))}
             </select>
           </label>
+          {persona && persona !== "Fleet Admin" && (
+            <label className="block">
+              <span className="text-xs text-slate-400">Location</span>
+              <select
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              >
+                <option value="">Select location</option>
+                {(locations.data ?? []).map((loc) => (
+                  <option key={loc.locationId} value={loc.locationId}>
+                    {loc.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {persona === "Driver" && (
+            <label className="block">
+              <span className="text-xs text-slate-400">Driver manager (Fleet Manager)</span>
+              <select
+                value={driverManagerUserId}
+                onChange={(e) => setDriverManagerUserId(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              >
+                <option value="">Unassigned</option>
+                {managerOptions.map((u) => (
+                  <option key={u.userId} value={u.userId}>
+                    {u.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block">
             <span className="text-xs text-slate-400">Email</span>
             <input

@@ -10,6 +10,7 @@ class TenantStatus(StrEnum):
 class Role(StrEnum):
     PLATFORM_ADMIN = "PlatformAdmin"
     FLEET_ADMIN = "FleetAdmin"
+    LOCATION_HEAD = "LocationHead"
     FLEET_MANAGER = "FleetManager"
     DRIVER = "Driver"
     VIEWER = "Viewer"
@@ -36,8 +37,16 @@ class DriverStatus(StrEnum):
 
 
 class AssignmentStatus(StrEnum):
+    SCHEDULED = "SCHEDULED"
     ACTIVE = "ACTIVE"
     ENDED = "ENDED"
+    CANCELLED = "CANCELLED"
+
+
+class TripStatus(StrEnum):
+    SCHEDULED = "SCHEDULED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
 
@@ -82,5 +91,11 @@ class Gender(StrEnum):
 
 class EmployeePersona(StrEnum):
     FLEET_ADMIN = "Fleet Admin"
+    LOCATION_HEAD = "Location Head"
     FLEET_MANAGER = "Fleet Manager"
     DRIVER = "Driver"
+
+
+class LocationStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"

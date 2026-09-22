@@ -1,6 +1,6 @@
 # Fleet & Driver Intelligence Platform
 
-Multi-tenant fleet and driver intelligence platform — Phase 1 foundation with **Phase 2 fleet management** (vehicles, drivers, assignments).
+Multi-tenant fleet and driver intelligence platform — **Phase 3 trips & route maps** (Phase 1 foundation, Phase 2 fleet + employees). **Organization & locations** (multi-site hierarchy, location-scoped fleet ops, Profile org chart). **Phase 4 (last)** adds live GPS and telemetry.
 
 ## Monorepo layout
 
@@ -103,6 +103,60 @@ Web: **Vehicles**, **Drivers**, **Assignments** in the sidebar. Platform admins 
 - [ ] Fleet manager can assign an available driver to an available vehicle
 - [ ] Ending an assignment returns driver/vehicle to `AVAILABLE` and keeps history
 - [ ] Tenant B admin cannot list tenant A vehicles (`tenantId` query blocked)
+
+## Organization & locations
+
+Tenant **locations** (sites/branches), reporting hierarchy (**Fleet Admin → Location Head → Fleet Manager → Driver**), **location-scoped** vehicles/drivers/assignments/trips/employees, and **Profile → Organization hierarchy** org chart. See [docs/architecture/org-hierarchy-and-locations.md](docs/architecture/org-hierarchy-and-locations.md).
+
+| Method | Path | Notes |
+|--------|------|--------|
+| GET/POST | `/api/v1/locations` | CRUD for tenant sites |
+| GET | `/api/v1/me/org-chart` | Role-based hierarchy tree |
+
+Redeploy CDK once to add Cognito group `LocationHead`.
+
+## Phase 3 — Trips & route maps
+
+Trips are created from an **active assignment** with a **scheduled window**, then **started** explicitly. Overlapping trips on the same assignment are blocked. Times in the web app use the user’s **Profile → Time zone** (default `Asia/Kolkata`).
+
+Pickup and destination coordinates plus **driving route distance** (`routeDistanceKm`) are stored on the trip; the admin UI shows a **route map** (not live vehicle tracking).
+
+| Method | Path | Roles |
+|--------|------|--------|
+| GET | `/api/v1/trips` | Read: all fleet roles (`activeOnly`, `openOnly`, `assignmentId` query params) |
+| POST | `/api/v1/trips` | Create scheduled trip (`assignmentId`, schedule, pickup/destination lat/lng → `routeDistanceKm`) |
+| GET | `/api/v1/trips/{id}` | Read |
+| PATCH | `/api/v1/trips/{id}` | Edit schedule while `SCHEDULED`; update route coords on `SCHEDULED` or `IN_PROGRESS` |
+| POST | `/api/v1/trips/{id}/start` | Start trip (sets `actualStartTime`) |
+| POST | `/api/v1/trips/{id}/end` | End trip: body `{ fuelRequiredLiters }` required to complete; sets `timeTakenMinutes` from actual start → end |
+| PATCH | `/api/v1/me` | Update profile `timeZone` |
+
+Web: **Trips**, **Trip detail** (Details \| Route map \| Assignment), **Trip routes** (pickup → destination overview).
+
+### Phase 3 acceptance checklist
+
+- [ ] Fleet manager creates a trip with pickup/destination; `routeDistanceKm` is stored
+- [ ] Route map shows pickup (green) and destination (red) with driving distance on OpenStreetMap
+- [ ] Ending an in-progress trip requires fuel (L); time taken is stored from actual start to end
+- [ ] Start/end trip updates driver and vehicle status correctly
+- [ ] Tenant B user cannot read tenant A trips (`403` on cross-tenant `tenantId`)
+
+## Phase 4 — Live tracking & telemetry *(last implementation phase)*
+
+Implement **after** Phase 3 is accepted. Not in scope for the current admin web release.
+
+| Method | Path | Notes |
+|--------|------|--------|
+| POST | `/api/v1/trips/{id}/location` | GPS ping — **API exists today**; admin UI and history **Phase 4** |
+
+Planned work:
+
+- Live GPS tracking on map (current position, not just planned route)
+- Location history (append-only trail / time series)
+- High-frequency telemetry ingestion and **Telemetry history** in the web UI
+- Mobile / IoT clients calling `POST /trips/{id}/location` (admin ping UI optional)
+
+Phase 3 intentionally does **not** include live tracking UI or telemetry dashboards.
 
 ## Phase 1 acceptance checklist
 

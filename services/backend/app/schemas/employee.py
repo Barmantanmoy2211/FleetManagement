@@ -8,6 +8,7 @@ from app.models import EmployeeStatus, Gender, EmployeePersona
 class EmployeeResponse(BaseModel):
     employeeId: str
     tenantId: str
+    locationId: str | None = None
     name: str
     employeeCode: str | None = None
     dateOfBirth: date | None = None
@@ -34,6 +35,8 @@ class EmployeeResponse(BaseModel):
     department: str | None = None
     jobRole: str | None = None
     linkedUserId: str | None = None
+    driverManagerUserId: str | None = None
+    driverManagerEmail: str | None = None
     createdAt: str
     updatedAt: str
 
@@ -76,6 +79,8 @@ class CreateEmployeeRequest(BaseModel):
     companyDriverId: str | None = Field(default=None, max_length=64)
     department: str | None = Field(default=None, max_length=120)
     jobRole: str | None = Field(default=None, max_length=120)
+    driverManagerUserId: str | None = None
+    locationId: str | None = None
     tenantId: str | None = None
 
 
@@ -105,6 +110,7 @@ class UpdateEmployeeRequest(BaseModel):
     companyDriverId: str | None = Field(default=None, max_length=64)
     department: str | None = Field(default=None, max_length=120)
     jobRole: str | None = Field(default=None, max_length=120)
+    driverManagerUserId: str | None = None
 
 
 class ImportEmployeeRowError(BaseModel):

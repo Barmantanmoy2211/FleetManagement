@@ -35,6 +35,7 @@ EMPLOYEE_IMPORT_HEADERS: list[tuple[str, str]] = [
     ("companyDriverId", "companyDriverId"),
     ("department", "department"),
     ("jobRole", "jobRole"),
+    ("driverManagerEmail", "driverManagerEmail"),
 ]
 
 HEADER_LABELS = [label for label, _ in EMPLOYEE_IMPORT_HEADERS]
@@ -65,6 +66,7 @@ SAMPLE_ROW = [
     "DRV-1001",
     "Operations",
     "Line haul",
+    "",
 ]
 
 
@@ -78,6 +80,7 @@ def build_employee_import_template_bytes() -> bytes:
     instructions.append(["Field", "Notes"])
     instructions.append(["name", "Required"])
     instructions.append(["persona", "Fleet Admin | Fleet Manager | Driver"])
+    instructions.append(["driverManagerEmail", "Fleet Manager user email (Driver persona only)"])
     instructions.append(["dateOfBirth / hireDate", "YYYY-MM-DD"])
     instructions.append(["isDriver / primaryContact", "yes or no"])
     instructions.append(["status", "ACTIVE | INACTIVE | ON_LEAVE | TERMINATED"])
@@ -113,6 +116,7 @@ def _parse_persona(value: str | None) -> EmployeePersona | None:
     normalized = value.strip().lower().replace(" ", "")
     mapping = {
         "fleetadmin": EmployeePersona.FLEET_ADMIN,
+        "locationhead": EmployeePersona.LOCATION_HEAD,
         "fleetmanager": EmployeePersona.FLEET_MANAGER,
         "driver": EmployeePersona.DRIVER,
     }
@@ -122,7 +126,7 @@ def _parse_persona(value: str | None) -> EmployeePersona | None:
         if persona.value.lower() == value.strip().lower():
             return persona
     raise ValueError(
-        f"Invalid persona '{value}' — use Fleet Admin, Fleet Manager, or Driver"
+        f"Invalid persona '{value}' — use Fleet Admin, Location Head, Fleet Manager, or Driver"
     )
 
 
@@ -221,6 +225,7 @@ def parse_employee_import_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]],
                     "companyDriverId": get_col("companyDriverId"),
                     "department": get_col("department"),
                     "jobRole": get_col("jobRole"),
+                    "driverManagerEmail": get_col("driverManagerEmail"),
                 }
             )
         except ValueError as exc:

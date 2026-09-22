@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CreateUserResponse, Employee } from "@fleet/types";
 import { ROLES } from "@fleet/constants";
 import { employeePersonaToRole } from "@/lib/employeePersona";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
 import { useAuthStore } from "@/stores/authStore";
 import { EditEmployeeModal } from "@/components/EditEmployeeModal";
+import { EntityAssignmentsPanel } from "@/components/EntityAssignmentsPanel";
+import { RecordDetailTabs } from "@/components/RecordDetailTabs";
 import { ApiError } from "@fleet/api-client";
+import { resolveFleetDriverIdForEmployee } from "@/lib/fleetDriverForEmployee";
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -59,7 +62,13 @@ function HighlightStat({ label, value }: { label: string; value: React.ReactNode
   );
 }
 
-function EmployeeDetailsSections({ emp }: { emp: Employee }) {
+function EmployeeDetailsSections({
+  emp,
+  driverManagerLabel,
+}: {
+  emp: Employee;
+  driverManagerLabel?: string | null;
+}) {
   return (
     <div className="mt-8 flex max-w-5xl flex-col gap-4">
       <Section title="Employee Details">
@@ -85,6 +94,9 @@ function EmployeeDetailsSections({ emp }: { emp: Employee }) {
           <Field label="Email" value={emp.email} />
           <Field label="Phone" value={emp.phone} />
           <Field label="Persona" value={emp.persona} />
+          {emp.persona === "Driver" && (
+            <Field label="Driver manager" value={driverManagerLabel} />
+          )}
           <Field label="Platform user" value={emp.linkedUserId ? "Linked" : "Not linked"} />
         </div>
       </Section>
@@ -131,10 +143,16 @@ export function EmployeeDetailPage() {
   const tenantId = useAuthStore((s) => s.tenantId);
   const isPlatformAdmin = role === ROLES.PLATFORM_ADMIN;
   const canWrite = role === ROLES.PLATFORM_ADMIN || role === ROLES.FLEET_ADMIN;
+  const canAssign =
+    role === ROLES.PLATFORM_ADMIN ||
+    role === ROLES.FLEET_ADMIN ||
+    role === ROLES.LOCATION_HEAD ||
+    role === ROLES.FLEET_MANAGER;
   const effectiveTenantId = isPlatformAdmin ? queryTenantId : tenantId ?? undefined;
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<"details" | "assignments">("details");
   const [userResult, setUserResult] = useState<CreateUserResponse | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -148,6 +166,30 @@ export function EmployeeDetailPage() {
       Boolean(employeeId) &&
       (isPlatformAdmin ? Boolean(queryTenantId) : Boolean(tenantId)),
   });
+
+  const tenantUsers = useQuery({
+    queryKey: ["users", effectiveTenantId],
+    queryFn: () => api.listUsers(effectiveTenantId!),
+    enabled: Boolean(effectiveTenantId) && employee.data?.persona === "Driver",
+  });
+
+  const driverManagerLabel =
+    employee.data?.driverManagerEmail ??
+    (employee.data?.driverManagerUserId &&
+      tenantUsers.data?.find((u) => u.userId === employee.data?.driverManagerUserId)?.email);
+
+  const fleetDrivers = useQuery({
+    queryKey: ["drivers", effectiveTenantId],
+    queryFn: () => api.listDrivers(effectiveTenantId!),
+    enabled: Boolean(effectiveTenantId) && employee.data?.persona === "Driver",
+  });
+
+  const fleetDriverId = useMemo(() => {
+    if (!employee.data || !fleetDrivers.data) {
+      return null;
+    }
+    return resolveFleetDriverIdForEmployee(employee.data, fleetDrivers.data);
+  }, [employee.data, fleetDrivers.data]);
 
   const remove = useMutation({
     mutationFn: () => api.deleteEmployee(employeeId!, effectiveTenantId),
@@ -306,7 +348,37 @@ export function EmployeeDetailPage() {
             </div>
           )}
 
-          <EmployeeDetailsSections emp={emp} />
+          {emp.persona === "Driver" && (
+            <RecordDetailTabs
+              tabs={[
+                { id: "details", label: "Details" },
+                { id: "assignments", label: "Driver assignment" },
+              ]}
+              activeId={detailTab}
+              onChange={(id) => setDetailTab(id as "details" | "assignments")}
+            />
+          )}
+
+          {(emp.persona !== "Driver" || detailTab === "details") && (
+            <EmployeeDetailsSections emp={emp} driverManagerLabel={driverManagerLabel} />
+          )}
+
+          {emp.persona === "Driver" && detailTab === "assignments" && effectiveTenantId && fleetDriverId && (
+            <EntityAssignmentsPanel
+              tenantId={effectiveTenantId}
+              canAssign={canAssign}
+              fixedDriverId={fleetDriverId}
+              listDriverId={fleetDriverId}
+              embedded
+            />
+          )}
+
+          {emp.persona === "Driver" && detailTab === "assignments" && effectiveTenantId && !fleetDriverId && (
+            <p className="mt-4 text-sm text-slate-500">
+              Assignments appear here after this driver has a platform user and fleet driver
+              profile.
+            </p>
+          )}
 
           {effectiveTenantId && (
             <EditEmployeeModal

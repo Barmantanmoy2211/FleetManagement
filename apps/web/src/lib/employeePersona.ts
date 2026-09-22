@@ -9,6 +9,8 @@ export function employeePersonaToRole(
       return ROLES.FLEET_ADMIN;
     case "Fleet Manager":
       return ROLES.FLEET_MANAGER;
+    case "Location Head":
+      return ROLES.LOCATION_HEAD;
     case "Driver":
       return ROLES.DRIVER;
     default:

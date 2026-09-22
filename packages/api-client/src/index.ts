@@ -2,6 +2,10 @@ import { API_V1_PREFIX, ROLES, type RoleName } from "@fleet/constants";
 import type {
   Assignment,
   CreateAssignmentRequest,
+  CreateTripRequest,
+  EndTripRequest,
+  UpdateTripRequest,
+  UpdateAssignmentRequest,
   CreateTenantRequest,
   CreateUserRequest,
   CreateUserResponse,
@@ -15,10 +19,18 @@ import type {
   ImportEmployeesResponse,
   ImportVehiclesResponse,
   MeResponse,
+  OrgChartNode,
+  TenantLocation,
+  CreateLocationRequest,
+  UpdateLocationRequest,
+  UpdateMeRequest,
+  StartTripRequest,
   Tenant,
   TenantDetail,
+  Trip,
   UpdateEmployeeRequest,
   UpdateTenantRequest,
+  UpdateTripLocationRequest,
   UpdateVehicleRequest,
   UserProfile,
   Vehicle,
@@ -32,6 +44,8 @@ function employeePersonaToRole(
   switch (persona) {
     case "Fleet Admin":
       return ROLES.FLEET_ADMIN;
+    case "Location Head":
+      return ROLES.LOCATION_HEAD;
     case "Fleet Manager":
       return ROLES.FLEET_MANAGER;
     case "Driver":
@@ -100,6 +114,47 @@ export class FleetApiClient {
 
   me(): Promise<MeResponse> {
     return this.request(`${API_V1_PREFIX}/me`);
+  }
+
+  updateMe(body: UpdateMeRequest): Promise<MeResponse> {
+    return this.request(`${API_V1_PREFIX}/me`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  getOrgChart(tenantId?: string): Promise<OrgChartNode> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/me/org-chart${qs}`);
+  }
+
+  listLocations(tenantId?: string): Promise<TenantLocation[]> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/locations${qs}`);
+  }
+
+  createLocation(body: CreateLocationRequest): Promise<TenantLocation> {
+    return this.request(`${API_V1_PREFIX}/locations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  getLocation(locationId: string, tenantId?: string): Promise<TenantLocation> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/locations/${locationId}${qs}`);
+  }
+
+  updateLocation(
+    locationId: string,
+    body: UpdateLocationRequest,
+    tenantId?: string,
+  ): Promise<TenantLocation> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/locations/${locationId}${qs}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   }
 
   listTenants(): Promise<Tenant[]> {
@@ -258,10 +313,15 @@ export class FleetApiClient {
     return this.request(`${API_V1_PREFIX}/drivers/import-candidates${qs}`);
   }
 
-  listAssignments(tenantId?: string, activeOnly = false): Promise<Assignment[]> {
+  listAssignments(
+    tenantId?: string,
+    options?: { activeOnly?: boolean; driverId?: string; vehicleId?: string },
+  ): Promise<Assignment[]> {
     const params = new URLSearchParams();
     if (tenantId) params.set("tenantId", tenantId);
-    if (activeOnly) params.set("activeOnly", "true");
+    if (options?.activeOnly) params.set("activeOnly", "true");
+    if (options?.driverId) params.set("driverId", options.driverId);
+    if (options?.vehicleId) params.set("vehicleId", options.vehicleId);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return this.request(`${API_V1_PREFIX}/assignments${qs}`);
   }
@@ -270,6 +330,37 @@ export class FleetApiClient {
     return this.request(`${API_V1_PREFIX}/assignments`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  getAssignment(assignmentId: string, tenantId?: string): Promise<Assignment> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/assignments/${assignmentId}${qs}`);
+  }
+
+  updateAssignment(
+    assignmentId: string,
+    body: UpdateAssignmentRequest,
+    tenantId?: string,
+  ): Promise<Assignment> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/assignments/${assignmentId}${qs}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteAssignment(assignmentId: string, tenantId?: string): Promise<Assignment> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/assignments/${assignmentId}${qs}`, {
+      method: "DELETE",
+    });
+  }
+
+  activateAssignment(assignmentId: string, tenantId?: string): Promise<Assignment> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/assignments/${assignmentId}/activate${qs}`, {
+      method: "POST",
     });
   }
 
@@ -284,6 +375,88 @@ export class FleetApiClient {
     const qs = params.toString() ? `?${params.toString()}` : "";
     return this.request(`${API_V1_PREFIX}/assignments/${assignmentId}/end${qs}`, {
       method: "POST",
+    });
+  }
+
+  listTrips(
+    tenantId?: string,
+    options?: {
+      activeOnly?: boolean;
+      openOnly?: boolean;
+      assignmentId?: string;
+    },
+  ): Promise<Trip[]> {
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenantId", tenantId);
+    if (options?.activeOnly) params.set("activeOnly", "true");
+    if (options?.openOnly) params.set("openOnly", "true");
+    if (options?.assignmentId) params.set("assignmentId", options.assignmentId);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`${API_V1_PREFIX}/trips${qs}`);
+  }
+
+  getTrip(tripId: string, tenantId?: string): Promise<Trip> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/trips/${tripId}${qs}`);
+  }
+
+  createTrip(body: CreateTripRequest): Promise<Trip> {
+    return this.request(`${API_V1_PREFIX}/trips`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** @deprecated use createTrip */
+  startTrip(body: StartTripRequest): Promise<Trip> {
+    return this.createTrip(body);
+  }
+
+  activateTrip(tripId: string, tenantId?: string): Promise<Trip> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/trips/${tripId}/start${qs}`, {
+      method: "POST",
+    });
+  }
+
+  updateTrip(
+    tripId: string,
+    body: UpdateTripRequest,
+    tenantId?: string,
+  ): Promise<Trip> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/trips/${tripId}${qs}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  endTrip(
+    tripId: string,
+    body?: EndTripRequest,
+    tenantId?: string,
+    cancel = false,
+  ): Promise<Trip> {
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenantId", tenantId);
+    if (cancel && !body) params.set("cancel", "true");
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const payload: EndTripRequest = body ?? (cancel ? { cancel: true } : {});
+    return this.request(`${API_V1_PREFIX}/trips/${tripId}/end${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  updateTripLocation(
+    tripId: string,
+    body: UpdateTripLocationRequest,
+    tenantId?: string,
+  ): Promise<Trip> {
+    const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`${API_V1_PREFIX}/trips/${tripId}/location${qs}`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 

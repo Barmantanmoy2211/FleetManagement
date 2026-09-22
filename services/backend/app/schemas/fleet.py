@@ -7,6 +7,7 @@ from app.models import (
     DriverStatus,
     FuelType,
     LeaseOwnershipType,
+    TripStatus,
     VehicleStatus,
     VehicleType,
 )
@@ -21,6 +22,7 @@ def _vehicle_age(year: int | None) -> int | None:
 class VehicleResponse(BaseModel):
     vehicleId: str
     tenantId: str
+    locationId: str | None = None
     vehicleName: str
     registrationNumber: str
     vin: str | None = None
@@ -41,6 +43,8 @@ class VehicleResponse(BaseModel):
     odometerKm: float | None = None
     currentDriverId: str | None = None
     currentAssignmentId: str | None = None
+    lastLatitude: float | None = None
+    lastLongitude: float | None = None
     createdAt: str
     updatedAt: str
 
@@ -75,6 +79,7 @@ class CreateVehicleRequest(BaseModel):
     status: VehicleStatus = VehicleStatus.AVAILABLE
     odometerKm: float | None = Field(default=None, ge=0)
     tenantId: str | None = None
+    locationId: str | None = None
 
 
 class UpdateVehicleRequest(BaseModel):
@@ -113,6 +118,7 @@ class ImportVehiclesResponse(BaseModel):
 class DriverResponse(BaseModel):
     driverId: str
     tenantId: str
+    locationId: str | None = None
     name: str
     email: EmailStr | None = None
     phone: str | None = None
@@ -124,6 +130,7 @@ class DriverResponse(BaseModel):
     joiningDate: date | None = None
     currentVehicleId: str | None = None
     currentAssignmentId: str | None = None
+    linkedUserId: str | None = None
     createdAt: str
     updatedAt: str
 
@@ -155,8 +162,11 @@ class UpdateDriverRequest(BaseModel):
 class AssignmentResponse(BaseModel):
     assignmentId: str
     tenantId: str
+    locationId: str | None = None
     driverId: str
     vehicleId: str
+    changeDate: date
+    releaseDate: date | None = None
     startTime: str
     endTime: str | None = None
     status: AssignmentStatus
@@ -168,7 +178,77 @@ class AssignmentResponse(BaseModel):
 class CreateAssignmentRequest(BaseModel):
     driverId: str
     vehicleId: str
+    changeDate: date
+    releaseDate: date | None = None
     tenantId: str | None = None
+
+
+class UpdateAssignmentRequest(BaseModel):
+    changeDate: date | None = None
+    releaseDate: date | None = None
+
+
+class TripResponse(BaseModel):
+    tripId: str
+    tenantId: str
+    assignmentId: str
+    driverId: str
+    vehicleId: str
+    status: TripStatus
+    scheduledStartTime: str
+    scheduledEndTime: str
+    actualStartTime: str | None = None
+    pickupLatitude: float
+    pickupLongitude: float
+    destinationLatitude: float
+    destinationLongitude: float
+    routeDistanceKm: float
+    timeTakenMinutes: float | None = None
+    fuelRequiredLiters: float | None = None
+    startTime: str
+    endTime: str | None = None
+    lastLatitude: float | None = None
+    lastLongitude: float | None = None
+    startedBy: str
+    createdAt: str
+    updatedAt: str
+
+
+class CreateTripRequest(BaseModel):
+    assignmentId: str
+    scheduledStartTime: str
+    scheduledEndTime: str
+    pickupLatitude: float = Field(ge=-90, le=90)
+    pickupLongitude: float = Field(ge=-180, le=180)
+    destinationLatitude: float = Field(ge=-90, le=90)
+    destinationLongitude: float = Field(ge=-180, le=180)
+    tenantId: str | None = None
+
+
+class UpdateTripRequest(BaseModel):
+    scheduledStartTime: str | None = None
+    scheduledEndTime: str | None = None
+    pickupLatitude: float | None = Field(default=None, ge=-90, le=90)
+    pickupLongitude: float | None = Field(default=None, ge=-180, le=180)
+    destinationLatitude: float | None = Field(default=None, ge=-90, le=90)
+    destinationLongitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class StartTripRequest(BaseModel):
+    """Legacy alias: immediate trip with a default 8h window ending at scheduledEndTime."""
+
+    assignmentId: str
+    tenantId: str | None = None
+
+
+class UpdateTripLocationRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class EndTripRequest(BaseModel):
+    cancel: bool = False
+    fuelRequiredLiters: float | None = Field(default=None, gt=0, le=100_000)
 
 
 class SyncDriversResponse(BaseModel):

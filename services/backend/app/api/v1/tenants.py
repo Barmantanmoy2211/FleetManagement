@@ -10,6 +10,7 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 TENANT_DETAIL_ROLES = (
     Role.PLATFORM_ADMIN,
     Role.FLEET_ADMIN,
+    Role.LOCATION_HEAD,
     Role.FLEET_MANAGER,
 )
 
